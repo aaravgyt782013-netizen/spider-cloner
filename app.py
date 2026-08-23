@@ -180,7 +180,7 @@ def clone_server():
     
     def generate_stream():
         yield "<html><head><title>Cloning Logs</title><link href='https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap' rel='stylesheet'><style>body{background:#050505;color:#00ffcc;font-family:'Inter',sans-serif;padding:20px;}pre{background:#0b0b0e;padding:15px;border:1px solid #8b0000;border-radius:8px;max-height:80vh;overflow-y:auto;font-size:12px;}</style></head><body>"
-        yield "<h2>⚡ SPIDEY CLONER EXECUTION LOGS</h2><pre>"
+        yield "<h2>⚡ SPIDEY CLONER EXECUTION LOGS</h2><pre>" + (" " * 1024) + "\n"
         
         # 1. Delete Channels
         if del_channels:
@@ -190,46 +190,55 @@ def clone_server():
                 for ch in r_tc.json():
                     requests.delete(f"https://discord.com/api/v10/channels/{ch['id']}", headers=headers)
                     yield f"[-] Deleted channel: {ch['name']}\n"
+                    time.sleep(0.1)
 
         # 2. Delete Roles
         if del_roles:
             yield "[+] Clearing target roles...\n"
             r_tr = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
             if r_tr.status_code == 200:
-                for role in r_tr.json():
-                    if role['name'] != "@everyone" and not role.get('managed'):
-                        requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers)
-                        yield f"[-] Deleted role: {role['name']}\n"
+                for role in sorted(r_tr.json(), key=lambda x: x['position'], reverse=True):
+                    if role['name'] != "@everyone" and not role.get('managed') and not role.get('bot_id'):
+                        del_res = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers)
+                        if del_res.status_code in [200, 204]:
+                            yield f"[-] Deleted role: {role['name']}\n"
+                        else:
+                            yield f"[!] Could not delete role {role['name']} (Skipped)\n"
+                        time.sleep(0.2)
 
-        # 3. Clone Roles with Ordering & Rate-Limit Prevention
+        # 3. Clone Roles in Correct Hierarchical Order
         role_map = {}
         if c_roles:
-            yield "[+] Fetching source roles...\n"
+            yield "[+] Fetching and creating roles in proper order...\n"
             r_roles = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
             if r_roles.status_code == 200:
+                # Sort from lowest position to highest position so hierarchy builds correctly
                 source_roles = sorted([r for r in r_roles.json() if not r.get("managed")], key=lambda x: x['position'])
                 for role in source_roles:
                     if role['name'] == "@everyone":
+                        # Update default @everyone permissions directly
+                        requests.patch(f"https://discord.com/api/v10/guilds/{target_id}/roles/{target_id}", headers=headers, json={"permissions": str(role['permissions'])})
                         continue
+                        
                     payload = {
                         "name": role['name'],
-                        "permissions": role['permissions'],
-                        "color": role['color'],
-                        "hoist": role['hoist'],
-                        "mentionable": role['mentionable']
+                        "permissions": str(role['permissions']),
+                        "color": int(role.get('color', 0)),
+                        "hoist": bool(role.get('hoist', False)),
+                        "mentionable": bool(role.get('mentionable', False))
                     }
                     cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
                     if cr.status_code == 429:
-                        yield "[!] Rate limited by Discord, waiting 5 seconds...\n"
+                        yield "[!] Rate limited, waiting 5s...\n"
                         time.sleep(5)
                         cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
-                    
+                        
                     if cr.status_code in [200, 201]:
                         new_role = cr.json()
                         role_map[role['id']] = new_role['id']
                         yield f"[V] Created role: {role['name']}\n"
                     else:
-                        yield f"[X] Skipped role {role['name']} (Status: {cr.status_code})\n"
+                        yield f"[X] Failed Role {role['name']} (Code: {cr.status_code})\n"
                     time.sleep(0.2)
 
         # 4. Clone Channels & Categories
@@ -245,10 +254,6 @@ def clone_server():
                 for cat in sorted(categories, key=lambda x: x.get('position', 0)):
                     payload = {"name": cat['name'], "type": 4}
                     cc = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
-                    if cc.status_code == 429:
-                        time.sleep(5)
-                        cc = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
-                        
                     if cc.status_code in [200, 201]:
                         new_cat = cc.json()
                         cat_map[cat['id']] = new_cat['id']
@@ -268,14 +273,8 @@ def clone_server():
                         payload['parent_id'] = cat_map[ch['parent_id']]
                         
                     ch_create = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
-                    if ch_create.status_code == 429:
-                        time.sleep(5)
-                        ch_create = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
-
                     if ch_create.status_code in [200, 201]:
                         yield f"[V] Created Channel: {ch['name']}\n"
-                    else:
-                        yield f"[X] Failed Channel {ch['name']} (Status: {ch_create.status_code})\n"
                     time.sleep(0.2)
 
         # 5. Clone Emojis
