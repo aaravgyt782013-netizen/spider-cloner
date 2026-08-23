@@ -5,11 +5,12 @@ import os
 import base64
 
 application = Flask(__name__)
-app = application  # Explicitly bind both names for Gunicorn
+app = application
 app.secret_key = os.urandom(24)
 
 CLIENT_ID = os.environ.get("CLIENT_ID", "YOUR_CLIENT_ID")
 CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "YOUR_CLIENT_SECRET")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN")
 AUTHORIZED_USERS = []
 
 LOGIN_PAGE = """<!DOCTYPE html>
@@ -51,7 +52,7 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
         .nav { display: flex; gap: 10px; margin-bottom: 20px; }
         .nav a { flex: 1; text-align: center; padding: 10px; background: #121218; color: #ff1e1e; text-decoration: none; font-family: 'Orbitron', sans-serif; font-size: 12px; border-radius: 6px; border: 1px solid #331a1a; }
         .nav a.active { background: #8b0000; color: #fff; border-color: #ff1e1e; }
-        input[type="text"], input[type="password"] { width: 100%; padding: 12px; margin-top: 6px; margin-bottom: 12px; background: #08080a; color: #fff; border: 1px solid #262636; border-radius: 8px; box-sizing: border-box; }
+        input[type="text"] { width: 100%; padding: 12px; margin-top: 6px; margin-bottom: 12px; background: #08080a; color: #fff; border: 1px solid #262636; border-radius: 8px; box-sizing: border-box; }
         .checkbox-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; background: #050507; padding: 12px; border-radius: 8px; border: 1px solid #1f1f2e; font-size: 13px; }
         .checkbox-grid label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
         button { width: 100%; padding: 14px; margin-top: 15px; background: #8b0000; color: white; font-family: 'Orbitron', sans-serif; font-weight: 700; border-radius: 8px; border: 1px solid #ff1e1e; cursor: pointer; }
@@ -81,16 +82,13 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
             <h4>📖 Quick Setup Tutorial:</h4>
             1. Click the button below to add your Discord Bot to your <b>Target Server</b> with Administrator permissions.<br>
             2. In your Target Server, go to <b>Server Settings > Roles</b> and drag your Bot's role all the way to the <b>very top</b> of the list.<br>
-            3. Paste your <b>Bot Token</b> below.<br>
-            4. Paste the <b>Source Server ID</b> (server you want to copy) and <b>Target Server ID</b> (your server where the bot is added).
+            3. Paste the <b>Source Server ID</b> (server you want to copy) and <b>Target Server ID</b> (your server where the bot is added).<br>
+            4. Make sure your Render Environment variable has your <b>BOT_TOKEN</b> saved!
         </div>
 
         <a class="btn-link" href="https://discord.com/api/oauth2/authorize?client_id={{ client_id }}&permissions=8&scope=bot" target="_blank">➕ INVITE BOT TO TARGET SERVER (ADMIN)</a>
 
         <form method="POST" action="/clone" target="_blank">
-            <label>Discord Bot Token</label>
-            <input type="password" name="token" required placeholder="Paste bot token here...">
-            
             <label>Source Server ID (To Copy From)</label>
             <input type="text" name="source_id" required placeholder="Source Server ID...">
             
@@ -180,8 +178,7 @@ def callback():
 
 @app.route("/clone", methods=["POST"])
 def clone_server():
-    raw_token = request.form.get("token", "").strip()
-    token = raw_token if raw_token.startswith("Bot ") else f"Bot {raw_token}"
+    token = f"Bot {BOT_TOKEN.strip()}"
     
     source_id = request.form.get("source_id")
     target_id = request.form.get("target_id")
@@ -352,12 +349,11 @@ def mass_join():
         return redirect("/")
     
     guild_id = request.form.get("guild_id")
-    bot_token = os.environ.get("BOT_TOKEN", "")
     
     success_count = 0
     for u in AUTHORIZED_USERS:
         url = f"https://discord.com/api/v10/guilds/{guild_id}/members/{u['id']}"
-        headers = {"Authorization": f"Bot {bot_token}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bot {BOT_TOKEN.strip()}", "Content-Type": "application/json"}
         payload = {"access_token": u['token']}
         try:
             r = requests.put(url, headers=headers, json=payload, timeout=2)
