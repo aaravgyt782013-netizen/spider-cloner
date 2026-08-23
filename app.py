@@ -148,17 +148,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
                 const result = await response.json();
                 if (result.logs && Array.isArray(result.logs)) {
-                    logBox.innerText = result.logs.join("\\n");
+                    logBox.innerText = result.logs.join("\n");
                 } else {
                     logBox.innerText = "[!] Received empty response structure from server.";
                 }
             } catch (err) {
-                logBox.innerText += "\\n[!] Critical execution error:\\n" + err.message;
+                logBox.innerText += "\n[!] Critical execution error:\n" + err.message;
             }
         });
     </script>
 </body>
-</html>"""
+</html>
+"""
 
 @app.route("/")
 def index():
@@ -182,7 +183,6 @@ def clone():
     logs.append(f"✅ Target Source Acquired: {src_res.json().get('name')}")
     logs.append("🧹 Cleaning target server safely...")
 
-    # Cleanup channels/categories with rate-limit mitigation
     if data.get("del_channels") or data.get("del_categories"):
         tgt_chan_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers)
         if tgt_chan_res.status_code == 200:
@@ -193,10 +193,10 @@ def clone():
                     if del_res.status_code == 429:
                         time.sleep(float(del_res.json().get("retry_after", 2)))
                         requests.delete(f"https://discord.com/api/v10/channels/{c['id']}", headers=headers)
-                    logs.append(f"🗑️ Deleted {'Category' : 'Channel' if not is_cat else 'Category'}: {c['name']}")
+                    item_type = "Category" if is_cat else "Channel"
+                    logs.append(f"🗑️ Deleted {item_type}: {c['name']}")
                     time.sleep(0.4)
 
-    # Cleanup roles
     if data.get("del_roles"):
         tgt_roles_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
         if tgt_roles_res.status_code == 200:
@@ -291,4 +291,3 @@ if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
