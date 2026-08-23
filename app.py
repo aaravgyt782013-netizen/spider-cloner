@@ -193,28 +193,31 @@ def clone_server():
                         pass
                     time.sleep(0.02)
 
-        # 2. Aggressive Multi-Pass Role Purge (Bypasses hanging locks)
+        # 2. Resilient Role Purge with Non-Blocking Skip on Hierarchy Limits
         if del_roles:
-            yield "[+] Purging target roles completely...\n"
+            yield "[+] Purging target roles safely...\n"
             for pass_num in range(3):
                 r_tr = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
                 if r_tr.status_code == 200:
                     roles = r_tr.json()
                     deleted_any = False
                     for role in sorted(roles, key=lambda x: x['position'], reverse=True):
-                        if role['name'] != "@everyone" and not role.get('managed') and not role.get('bot_id') and not role.get('tags'):
+                        if role['name'] != "@everyone" and not role.get('managed') and not role.get('bot_id'):
                             try:
                                 res = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers, timeout=2)
                                 if res.status_code in [200, 204]:
                                     deleted_any = True
                                     yield f"[X] Deleted role: {role['name']}\n"
+                                elif res.status_code == 403:
+                                    # Skip roles locked above token account hierarchy without freezing
+                                    pass
                             except:
                                 pass
                             time.sleep(0.04)
                     if not deleted_any:
                         break
 
-        # 3. Clone Roles in exact matching sequence
+        # 3. Clone Roles (Safely bypassing uncreatable hierarchy thresholds)
         if c_roles:
             yield "[+] Creating roles in order...\n"
             r_source_roles = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
@@ -239,6 +242,8 @@ def clone_server():
                         res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload, timeout=2)
                         if res.status_code in [200, 201]:
                             yield f"[V] Created role: {role['name']}\n"
+                        else:
+                            yield f"[-] Skipped role (Hierarchy lock): {role['name']}\n"
                     except:
                         pass
                     time.sleep(0.05)
