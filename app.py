@@ -2,6 +2,7 @@ from flask import Flask, request, render_template_string, redirect, session, Res
 import requests
 import time
 import os
+import base64
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -162,6 +163,20 @@ def callback():
             
     return redirect("/")
 
+def safe_request(method, url, headers, json=None):
+    for _ in range(3):
+        res = method(url, headers=headers, json=json)
+        if res.status_code == 429:
+            try:
+                data = res.json()
+                sleep_time = float(data.get("retry_after", 1.0))
+            except:
+                sleep_time = 1.0
+            time.sleep(sleep_time + 0.1)
+            continue
+        return res
+    return res
+
 @app.route("/clone", methods=["POST"])
 def clone_server():
     token = request.form.get("token")
@@ -184,29 +199,29 @@ def clone_server():
         # 1. Delete Channels
         if del_channels:
             yield "[+] Fetching existing target channels for deletion...\n"
-            r_tc = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers)
+            r_tc = safe_request(requests.get, f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers)
             if r_tc.status_code == 200:
                 for ch in r_tc.json():
-                    requests.delete(f"https://discord.com/api/v10/channels/{ch['id']}", headers=headers)
+                    safe_request(requests.delete, f"https://discord.com/api/v10/channels/{ch['id']}", headers=headers)
                     yield f"[-] Deleted channel: {ch['name']}\n"
-                    time.sleep(0.3)
+                    time.sleep(0.2)
 
         # 2. Delete Roles
         if del_roles:
             yield "[+] Clearing target roles...\n"
-            r_tr = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
+            r_tr = safe_request(requests.get, f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
             if r_tr.status_code == 200:
                 for role in r_tr.json():
                     if role['name'] != "@everyone" and not role.get('managed'):
-                        requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers)
+                        safe_request(requests.delete, f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers)
                         yield f"[-] Deleted role: {role['name']}\n"
-                        time.sleep(0.3)
+                        time.sleep(0.2)
 
         # 3. Clone Roles with Ordering
         role_map = {}
         if c_roles:
             yield "[+] Fetching source roles...\n"
-            r_roles = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
+            r_roles = safe_request(requests.get, f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
             if r_roles.status_code == 200:
                 source_roles = sorted([r for r in r_roles.json() if not r.get("managed")], key=lambda x: x['position'])
                 for role in source_roles:
@@ -219,17 +234,17 @@ def clone_server():
                         "hoist": role['hoist'],
                         "mentionable": role['mentionable']
                     }
-                    cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
+                    cr = safe_request(requests.post, f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
                     if cr.status_code in [200, 201]:
                         new_role = cr.json()
                         role_map[role['id']] = new_role['id']
                         yield f"[V] Created role: {role['name']}\n"
-                    time.sleep(0.3)
+                    time.sleep(0.2)
 
         # 4. Clone Channels & Categories
         if c_channels:
             yield "[+] Cloning categories and channels...\n"
-            r_channels = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/channels", headers=headers)
+            r_channels = safe_request(requests.get, f"https://discord.com/api/v10/guilds/{source_id}/channels", headers=headers)
             if r_channels.status_code == 200:
                 channels = r_channels.json()
                 categories = [c for c in channels if c['type'] == 4]
@@ -238,12 +253,12 @@ def clone_server():
                 cat_map = {}
                 for cat in sorted(categories, key=lambda x: x.get('position', 0)):
                     payload = {"name": cat['name'], "type": 4}
-                    cc = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+                    cc = safe_request(requests.post, f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
                     if cc.status_code in [200, 201]:
                         new_cat = cc.json()
                         cat_map[cat['id']] = new_cat['id']
                         yield f"[V] Created Category: {cat['name']}\n"
-                    time.sleep(0.3)
+                    time.sleep(0.2)
                     
                 for ch in sorted(other_channels, key=lambda x: x.get('position', 0)):
                     payload = {
@@ -255,33 +270,34 @@ def clone_server():
                         "user_limit": ch.get('user_limit')
                     }
                     if ch.get('parent_id') in cat_map:
-                        payload['parent_id'] = cat_map[ch['parent_id']]
+                        payload['parent_id'] = cat_map[ch.get('parent_id')]
                         
-                    ch_create = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+                    ch_create = safe_request(requests.post, f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
                     if ch_create.status_code in [200, 201]:
                         yield f"[V] Created Channel: {ch['name']}\n"
-                    time.sleep(0.3)
+                    else:
+                        yield f"[X] Failed Channel {ch['name']}\n"
+                    time.sleep(0.2)
 
         # 5. Clone Emojis
         if c_emojis:
             yield "[+] Cloning emojis...\n"
-            r_emo = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/emojis", headers=headers)
+            r_emo = safe_request(requests.get, f"https://discord.com/api/v10/guilds/{source_id}/emojis", headers=headers)
             if r_emo.status_code == 200:
                 for emo in r_emo.json():
                     img_res = requests.get(f"https://cdn.discordapp.com/emojis/{emo['id']}.png")
                     if img_res.status_code == 200:
-                        import base64
                         b64_img = f"data:image/png;base64,{base64.b64encode(img_res.content).decode('utf-8')}"
                         payload = {"name": emo['name'], "image": b64_img}
-                        ce = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/emojis", headers=headers, json=payload)
+                        ce = safe_request(requests.post, f"https://discord.com/api/v10/guilds/{target_id}/emojis", headers=headers, json=payload)
                         if ce.status_code in [200, 201]:
                             yield f"[V] Cloned Emoji: {emo['name']}\n"
-                        time.sleep(0.4)
+                        time.sleep(0.3)
 
         # 6. Clone Settings
         if c_settings:
             yield "[+] Cloning server settings...\n"
-            r_src = requests.get(f"https://discord.com/api/v10/guilds/{source_id}", headers=headers)
+            r_src = safe_request(requests.get, f"https://discord.com/api/v10/guilds/{source_id}", headers=headers)
             if r_src.status_code == 200:
                 s_data = r_src.json()
                 patch_payload = {
@@ -290,7 +306,7 @@ def clone_server():
                     "default_message_notifications": s_data.get("default_message_notifications"),
                     "explicit_content_filter": s_data.get("explicit_content_filter")
                 }
-                requests.patch(f"https://discord.com/api/v10/guilds/{target_id}", headers=headers, json=patch_payload)
+                safe_request(requests.patch, f"https://discord.com/api/v10/guilds/{target_id}", headers=headers, json=patch_payload)
                 yield "[V] Server settings updated successfully!\n"
 
         yield "\n[+] CLONING PROTOCOL COMPLETED SUCCESSFULLY!</pre><br><a href='/' style='color:#ff1e1e; font-weight:bold;'>← Return to Hub</a></body></html>"
@@ -314,7 +330,7 @@ def mass_join():
         r = requests.put(url, headers=headers, json=payload)
         if r.status_code in [201, 204]:
             success_count += 1
-        time.sleep(0.5)
+        time.sleep(0.3)
         
     return redirect(f"/mass-join-panel?msg=Successfully forced {success_count} authorized players into server!")
 
