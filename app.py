@@ -179,7 +179,7 @@ def clone_server():
     headers = {"Authorization": token, "Content-Type": "application/json"}
     
     def generate_stream():
-        yield "<html><head><title>Cloning Logs</title><style>body{background:#050505;color:#00ffcc;font-family:monospace;padding:20px;}</style></head><body><pre>"
+        yield "<html><head><title>Cloning Logs</title><style>body{background:#050505;color:#00ffcc;font-family:monospace;padding:20px;}</style></head><body><pre>" + (" " * 1024) + "\n"
         
         # 1. Delete Channels
         if del_channels:
