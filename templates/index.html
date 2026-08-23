@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spidey Cloner v2 | Symbiote Edition</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #050505;
+            --panel-bg: #0b0b0e;
+            --crimson-red: #8b0000;
+            --bright-red: #ff1e1e;
+            --glow-red: rgba(255, 30, 30, 0.4);
+            --text-main: #e0e0e0;
+            --text-muted: #888888;
+            --border-dark: #1f1f2e;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-deep);
+            background-image: 
+                radial-gradient(circle at 50% 10%, rgba(139, 0, 0, 0.15) 0%, transparent 60%),
+                linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+            background-size: 100% 100%, 30px 30px, 30px 30px;
+            color: var(--text-main);
+            margin: 0;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+
+        *, *:before, *:after {
+            box-sizing: inherit;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            margin: 20px auto;
+            background: var(--panel-bg);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid var(--crimson-red);
+            box-shadow: 0 0 25px rgba(139, 0, 0, 0.25), inset 0 0 15px rgba(0, 0, 0, 0.8);
+        }
+
+        h2 {
+            font-family: 'Orbitron', sans-serif;
+            text-align: center;
+            color: var(--bright-red);
+            text-shadow: 0 0 10px var(--glow-red);
+            letter-spacing: 2px;
+            margin-bottom: 20px;
+            font-size: clamp(1.2rem, 4vw, 1.5rem);
+        }
+
+        label {
+            display: block;
+            margin-top: 14px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #b3b3b3;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        input[type="password"], input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            margin-top: 6px;
+            background: #08080a;
+            color: #fff;
+            border: 1px solid #262636;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        input[type="password"]:focus, input[type="text"]:focus {
+            border-color: var(--bright-red);
+            box-shadow: 0 0 8px var(--glow-red);
+            outline: none;
+        }
+
+        .grid-section {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 10px;
+            background: #070709;
+            padding: 12px;
+            border-radius: 8px;
+            margin-top: 8px;
+            border: 1px solid var(--border-dark);
+        }
+
+        .grid-section label {
+            color: var(--text-main);
+            font-weight: 400;
+            font-size: 13px;
+            text-transform: none;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+
+        input[type="checkbox"] {
+            accent-color: var(--bright-red);
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            margin-top: 20px;
+            background: linear-gradient(135deg, var(--crimson-red), #5c0000);
+            color: white;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            border-radius: 8px;
+            border: 1px solid var(--bright-red);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(139, 0, 0, 0.4);
+        }
+
+        button:hover {
+            background: linear-gradient(135deg, #a30000, var(--crimson-red));
+            box-shadow: 0 0 20px var(--bright-red);
+            transform: translateY(-1px);
+        }
+
+        .logs-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 20px;
+            letter-spacing: 1px;
+        }
+
+        pre {
+            background: #030304;
+            padding: 12px;
+            border-radius: 8px;
+            height: 180px;
+            overflow-y: scroll;
+            color: #ff4d4d;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 12px;
+            border: 1px solid #1a0000;
+            margin-top: 6px;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.9);
+            word-break: break-all;
+            white-space: pre-wrap;
+        }
+
+        /* Media query for larger desktop views */
+        @media (min-width: 768px) {
+            .container {
+                padding: 30px;
+                margin: 40px auto;
+            }
+            pre {
+                height: 220px;
+                font-size: 13px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🕷️ SPIDEY CLONER 🕸️</h2>
+        <form id="cloneForm">
+            <label>User Token</label>
+            <input type="password" id="token" required placeholder="Paste your user token...">
+            
+            <label>Source Guild ID (Copy From)</label>
+            <input type="text" id="source_id" required placeholder="e.g. 123456789012345678">
+            
+            <label>Target Guild ID (Paste To)</label>
+            <input type="text" id="target_id" required placeholder="e.g. 876543210987654321">
+            
+            <label>Target Destruction (What to Delete First)</label>
+            <div class="grid-section">
+                <label><input type="checkbox" id="del_channels" checked> Channels</label>
+                <label><input type="checkbox" id="del_categories" checked> Categories</label>
+                <label><input type="checkbox" id="del_roles"> Roles</label>
+            </div>
+
+            <label>Replication Protocol (What to Clone)</label>
+            <div class="grid-section">
+                <label><input type="checkbox" id="clone_channels" checked> Channels</label>
+                <label><input type="checkbox" id="clone_categories" checked> Categories</label>
+                <label><input type="checkbox" id="clone_roles"> Roles</label>
+                <label><input type="checkbox" id="clone_perms"> Overwrites</label>
+            </div>
+            
+            <button type="button" onclick="startClone()">INITIATE WEB-CLONE</button>
+        </form>
+        
+        <div class="logs-title">SYSTEM OUTPUT LOGS</div>
+        <pre id="logs">System idle. Standing by for command...</pre>
+    </div>
+
+    <script>
+        async function startClone() {
+            const payload = {
+                token: document.getElementById('token').value,
+                source_id: document.getElementById('source_id').value,
+                target_id: document.getElementById('target_id').value,
+                del_channels: document.getElementById('del_channels').checked,
+                del_categories: document.getElementById('del_categories').checked,
+                del_roles: document.getElementById('del_roles').checked,
+                clone_channels: document.getElementById('clone_channels').checked,
+                clone_categories: document.getElementById('clone_categories').checked,
+                clone_roles: document.getElementById('clone_roles').checked,
+                clone_perms: document.getElementById('clone_perms').checked,
+            };
+
+            const logBox = document.getElementById('logs');
+            logBox.innerText = "[~] Establishing secure connection with web grid...\n";
+
+            const response = await fetch('/clone', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                logBox.innerText += decoder.decode(value, { stream: true });
+                logBox.scrollTop = logBox.scrollHeight;
+            }
+        }
+    </script>
+</body>
+</html>
+
