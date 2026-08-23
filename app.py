@@ -80,10 +80,9 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
         
         <div class="tutorial">
             <h4>📖 Quick Setup Tutorial:</h4>
-            1. Click the button below to add your Discord Bot to your <b>Target Server</b> with Administrator permissions.<br>
-            2. In your Target Server, go to <b>Server Settings > Roles</b> and drag your Bot's role all the way to the <b>very top</b> of the list.<br>
-            3. Paste the <b>Source Server ID</b> (server you want to copy) and <b>Target Server ID</b> (your server where the bot is added).<br>
-            4. Make sure your Render Environment variable has your <b>BOT_TOKEN</b> saved!
+            1. Click the button below to add your Bot with <b>Administrator permissions</b> to your target server.<br>
+            2. In your Target Server, go to <b>Server Settings > Roles</b> and drag your Bot's role all the way to the <b>very top</b>.<br>
+            3. Paste the <b>Source Server ID</b> and <b>Target Server ID</b> below and start cloning!
         </div>
 
         <a class="btn-link" href="https://discord.com/api/oauth2/authorize?client_id={{ client_id }}&permissions=8&scope=bot" target="_blank">➕ INVITE BOT TO TARGET SERVER (ADMIN)</a>
@@ -178,7 +177,8 @@ def callback():
 
 @app.route("/clone", methods=["POST"])
 def clone_server():
-    token = f"Bot {BOT_TOKEN.strip()}"
+    active_token = os.environ.get("BOT_TOKEN", BOT_TOKEN).strip()
+    token = f"Bot {active_token}"
     
     source_id = request.form.get("source_id")
     target_id = request.form.get("target_id")
@@ -349,11 +349,12 @@ def mass_join():
         return redirect("/")
     
     guild_id = request.form.get("guild_id")
+    active_token = os.environ.get("BOT_TOKEN", BOT_TOKEN).strip()
     
     success_count = 0
     for u in AUTHORIZED_USERS:
         url = f"https://discord.com/api/v10/guilds/{guild_id}/members/{u['id']}"
-        headers = {"Authorization": f"Bot {BOT_TOKEN.strip()}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bot {active_token}", "Content-Type": "application/json"}
         payload = {"access_token": u['token']}
         try:
             r = requests.put(url, headers=headers, json=payload, timeout=2)
