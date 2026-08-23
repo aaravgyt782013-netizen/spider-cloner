@@ -1,6 +1,7 @@
 from flask import Flask, request, render_template_string
 import requests
 import time
+import threading
 
 app = Flask(__name__)
 
@@ -111,6 +112,120 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </html>
 """
 
+def run_cloning_task(token, source_id, target_id, form_data):
+    headers = {"Authorization": token, "Content-Type": "application/json"}
+    print("🕸️ Connecting to Discord API...")
+
+    src_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}", headers=headers)
+    if src_res.status_code != 200:
+        print(f"❌ Error accessing source server: {src_res.text}")
+        return
+    
+    print(f"✅ Target Source Acquired: {src_res.json().get('name')}")
+    print("🧹 Cleaning target server safely...")
+
+    if form_data.get("del_channels") or form_data.get("del_categories"):
+        tgt_chan_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers)
+        if tgt_chan_res.status_code == 200:
+            for c in tgt_chan_res.json():
+                is_cat = (c['type'] == 4)
+                if (is_cat and form_data.get("del_categories")) or (not is_cat and form_data.get("del_channels")):
+                    del_res = requests.delete(f"https://discord.com/api/v10/channels/{c['id']}", headers=headers)
+                    if del_res.status_code == 429:
+                        time.sleep(float(del_res.json().get("retry_after", 2)))
+                        requests.delete(f"https://discord.com/api/v10/channels/{c['id']}", headers=headers)
+                    print(f"🗑️ Deleted {'Category' if is_cat else 'Channel'}: {c['name']}")
+                    time.sleep(0.3)
+
+    if form_data.get("del_roles"):
+        tgt_roles_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
+        if tgt_roles_res.status_code == 200:
+            for r in tgt_roles_res.json():
+                if r['name'] != "@everyone" and not r.get("managed"):
+                    del_res = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{r['id']}", headers=headers)
+                    if del_res.status_code == 429:
+                        time.sleep(float(del_res.json().get("retry_after", 2)))
+                        requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{r['id']}", headers=headers)
+                    print(f"🗑️ Deleted Role: {r['name']}")
+                    time.sleep(0.3)
+
+    role_map = {}
+    if form_data.get("clone_roles"):
+        print("🎭 Cloning Roles...")
+        src_roles_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
+        if src_roles_res.status_code == 200:
+            roles = sorted(src_roles_res.json(), key=lambda x: x.get('position', 0))
+            for r in roles:
+                if r['name'] == "@everyone" or r.get("managed"):
+                    continue
+                payload = {
+                    "name": r['name'], "permissions": r['permissions'],
+                    "color": r['color'], "hoist": r['hoist'], "mentionable": r['mentionable']
+                }
+                r_create = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
+                if r_create.status_code == 429:
+                    time.sleep(float(r_create.json().get("retry_after", 2)))
+                    r_create = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
+                
+                if r_create.status_code in [200, 201]:
+                    new_role = r_create.json()
+                    role_map[r['id']] = new_role['id']
+                    print(f"✨ Created Role: {r['name']}")
+                time.sleep(0.3)
+
+    if form_data.get("clone_channels") or form_data.get("clone_categories"):
+        print("📁 Cloning Categories & Channels...")
+        channels_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/channels", headers=headers)
+        if channels_res.status_code == 200:
+            channels = sorted(channels_res.json(), key=lambda x: x.get('position', 0))
+            category_map = {}
+
+            if form_data.get("clone_categories"):
+                for c in channels:
+                    if c['type'] == 4:
+                        payload = {"name": c['name'], "type": 4}
+                        cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+                        if cr.status_code == 429:
+                            time.sleep(float(cr.json().get("retry_after", 2)))
+                            cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+                        
+                        if cr.status_code in [200, 201]:
+                            new_cat = cr.json()
+                            category_map[c['id']] = new_cat['id']
+                            print(f"📁 Created Category: {c['name']}")
+                        time.sleep(0.3)
+
+            if form_data.get("clone_channels"):
+                for c in channels:
+                    if c['type'] != 4:
+                        payload = {
+                            "name": c['name'], "type": c['type'],
+                            "topic": c.get("topic"), "nsfw": c.get("nsfw", False),
+                            "bitrate": c.get("bitrate"), "user_limit": c.get("user_limit")
+                        }
+                        if c.get("parent_id") and c["parent_id"] in category_map:
+                            payload["parent_id"] = category_map[c["parent_id"]]
+                        
+                        if form_data.get("clone_perms") and "permission_overwrites" in c:
+                            new_overwrites = []
+                            for ow in c["permission_overwrites"]:
+                                if ow['type'] == 0 and ow['id'] in role_map:
+                                    new_overwrites.append({"id": role_map[ow['id']], "type": 0, "allow": ow['allow'], "deny": ow['deny']})
+                                elif ow['type'] == 1:
+                                    new_overwrites.append({"id": ow['id'], "type": 1, "allow": ow['allow'], "deny": ow['deny']})
+                            payload["permission_overwrites"] = new_overwrites
+
+                        cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+                        if cr.status_code == 429:
+                            time.sleep(float(cr.json().get("retry_after", 2)))
+                            cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+
+                        if cr.status_code in [200, 201]:
+                            print(f"💬 Created Channel: {c['name']}")
+                        time.sleep(0.3)
+
+    print("🎉 Spider-Cloning complete successfully!")
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     logs = None
@@ -119,118 +234,26 @@ def index():
         source_id = request.form.get("source_id")
         target_id = request.form.get("target_id")
         
-        headers = {"Authorization": token, "Content-Type": "application/json"}
-        logs = ["🕸️ Connecting to Discord API..."]
+        form_data = {
+            "del_channels": request.form.get("del_channels"),
+            "del_categories": request.form.get("del_categories"),
+            "del_roles": request.form.get("del_roles"),
+            "clone_channels": request.form.get("clone_channels"),
+            "clone_categories": request.form.get("clone_categories"),
+            "clone_roles": request.form.get("clone_roles"),
+            "clone_perms": request.form.get("clone_perms")
+        }
 
-        src_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}", headers=headers)
-        if src_res.status_code != 200:
-            logs.append(f"❌ Error accessing source server: {src_res.text}")
-            return render_template_string(HTML_TEMPLATE, logs=logs)
-        
-        logs.append(f"✅ Target Source Acquired: {src_res.json().get('name')}")
-        logs.append("🧹 Cleaning target server safely...")
+        # Run cloning in a background thread so the page loads instantly!
+        thread = threading.Thread(target=run_cloning_task, args=(token, source_id, target_id, form_data))
+        thread.start()
 
-        if request.form.get("del_channels") or request.form.get("del_categories"):
-            tgt_chan_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers)
-            if tgt_chan_res.status_code == 200:
-                for c in tgt_chan_res.json():
-                    is_cat = (c['type'] == 4)
-                    if (is_cat and request.form.get("del_categories")) or (not is_cat and request.form.get("del_channels")):
-                        del_res = requests.delete(f"https://discord.com/api/v10/channels/{c['id']}", headers=headers)
-                        if del_res.status_code == 429:
-                            time.sleep(float(del_res.json().get("retry_after", 2)))
-                            requests.delete(f"https://discord.com/api/v10/channels/{c['id']}", headers=headers)
-                        logs.append(f"🗑️ Deleted {'Category' if is_cat else 'Channel'}: {c['name']}")
-                        time.sleep(0.4)
+        logs = [
+            "🚀 Cloning protocol successfully dispatched!",
+            "⚡ Check your Render dashboard live logs right now to watch items get deleted and created in real time!"
+        ]
+        return render_template_string(HTML_TEMPLATE, logs=logs)
 
-        if request.form.get("del_roles"):
-            tgt_roles_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
-            if tgt_roles_res.status_code == 200:
-                for r in tgt_roles_res.json():
-                    if r['name'] != "@everyone" and not r.get("managed"):
-                        del_res = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{r['id']}", headers=headers)
-                        if del_res.status_code == 429:
-                            time.sleep(float(del_res.json().get("retry_after", 2)))
-                            requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{r['id']}", headers=headers)
-                        logs.append(f"🗑️ Deleted Role: {r['name']}")
-                        time.sleep(0.4)
-
-        role_map = {}
-        if request.form.get("clone_roles"):
-            logs.append("🎭 Cloning Roles...")
-            src_roles_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
-            if src_roles_res.status_code == 200:
-                roles = sorted(src_roles_res.json(), key=lambda x: x.get('position', 0))
-                for r in roles:
-                    if r['name'] == "@everyone" or r.get("managed"):
-                        continue
-                    payload = {
-                        "name": r['name'], "permissions": r['permissions'],
-                        "color": r['color'], "hoist": r['hoist'], "mentionable": r['mentionable']
-                    }
-                    r_create = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
-                    if r_create.status_code == 429:
-                        time.sleep(float(r_create.json().get("retry_after", 2)))
-                        r_create = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
-                    
-                    if r_create.status_code in [200, 201]:
-                        new_role = r_create.json()
-                        role_map[r['id']] = new_role['id']
-                        logs.append(f"✨ Created Role: {r['name']}")
-                    time.sleep(0.4)
-
-        if request.form.get("clone_channels") or request.form.get("clone_categories"):
-            logs.append("📁 Cloning Categories & Channels...")
-            channels_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/channels", headers=headers)
-            if channels_res.status_code == 200:
-                channels = sorted(channels_res.json(), key=lambda x: x.get('position', 0))
-                category_map = {}
-
-                if request.form.get("clone_categories"):
-                    for c in channels:
-                        if c['type'] == 4:
-                            payload = {"name": c['name'], "type": 4}
-                            cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
-                            if cr.status_code == 429:
-                                time.sleep(float(cr.json().get("retry_after", 2)))
-                                cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
-                            
-                            if cr.status_code in [200, 201]:
-                                new_cat = cr.json()
-                                category_map[c['id']] = new_cat['id']
-                                logs.append(f"📁 Created Category: {c['name']}")
-                            time.sleep(0.4)
-
-                if request.form.get("clone_channels"):
-                    for c in channels:
-                        if c['type'] != 4:
-                            payload = {
-                                "name": c['name'], "type": c['type'],
-                                "topic": c.get("topic"), "nsfw": c.get("nsfw", False),
-                                "bitrate": c.get("bitrate"), "user_limit": c.get("user_limit")
-                            }
-                            if c.get("parent_id") and c["parent_id"] in category_map:
-                                payload["parent_id"] = category_map[c["parent_id"]]
-                            
-                            if request.form.get("clone_perms") and "permission_overwrites" in c:
-                                new_overwrites = []
-                                for ow in c["permission_overwrites"]:
-                                    if ow['type'] == 0 and ow['id'] in role_map:
-                                        new_overwrites.append({"id": role_map[ow['id']], "type": 0, "allow": ow['allow'], "deny": ow['deny']})
-                                    elif ow['type'] == 1:
-                                        new_overwrites.append({"id": ow['id'], "type": 1, "allow": ow['allow'], "deny": ow['deny']})
-                                payload["permission_overwrites"] = new_overwrites
-
-                            cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
-                            if cr.status_code == 429:
-                                time.sleep(float(cr.json().get("retry_after", 2)))
-                                cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
-
-                            if cr.status_code in [200, 201]:
-                                logs.append(f"💬 Created Channel: {c['name']}")
-                            time.sleep(0.4)
-
-        logs.append("🎉 Spider-Cloning complete successfully!")
     return render_template_string(HTML_TEMPLATE, logs=logs)
 
 if __name__ == "__main__":
