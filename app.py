@@ -1,9 +1,13 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, jsonify
 import requests
 import time
 import threading
 
 app = Flask(__name__)
+
+# Global state to store logs for the current session
+current_logs = ["System idle. Standing by for command..."]
+is_cloning = False
 
 HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -73,11 +77,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             border: 1px solid #1a0000; margin-top: 6px; white-space: pre-wrap; word-break: break-all;
         }
     </style>
+    <script>
+        function startPolling() {
+            setInterval(async () => {
+                try {
+                    let res = await fetch('/logs');
+                    let data = await res.json();
+                    let logBox = document.getElementById('log-box');
+                    logBox.innerText = data.logs.join('\\n');
+                    logBox.scrollTop = logBox.scrollHeight;
+                } catch (e) {
+                    console.error(e);
+                }
+            }, 1000);
+        }
+        window.onload = startPolling;
+    </script>
 </head>
 <body>
     <div class="container">
         <h2>🕷️ SPIDEY CLONER 🕸️</h2>
-        <form method="POST" action="/">
+        <form method="POST" action="/clone">
             <label>User Token</label>
             <input type="password" name="token" required placeholder="Paste your user token...">
             
@@ -106,23 +126,32 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </form>
         
         <div class="logs-title">SYSTEM OUTPUT LOGS</div>
-        <pre>{{ logs | join('\\n') if logs else "System idle. Standing by for command..." }}</pre>
+        <pre id="log-box">Initializing web interface...</pre>
     </div>
 </body>
 </html>
 """
 
-def run_cloning_task(token, source_id, target_id, form_data):
-    headers = {"Authorization": token, "Content-Type": "application/json"}
-    print("🕸️ Connecting to Discord API...")
+def log_message(msg):
+    global current_logs
+    current_logs.append(msg)
+    print(msg)
 
+def run_cloning_task(token, source_id, target_id, form_data):
+    global is_cloning, current_logs
+    is_cloning = True
+    current_logs = ["🕸️ Connecting to Discord API..."]
+
+    headers = {"Authorization": token, "Content-Type": "application/json"}
     src_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}", headers=headers)
+    
     if src_res.status_code != 200:
-        print(f"❌ Error accessing source server: {src_res.text}")
+        log_message(f"❌ Error accessing source server: {src_res.text}")
+        is_cloning = False
         return
     
-    print(f"✅ Target Source Acquired: {src_res.json().get('name')}")
-    print("🧹 Cleaning target server safely...")
+    log_message(f"✅ Target Source Acquired: {src_res.json().get('name')}")
+    log_message("🧹 Cleaning target server safely...")
 
     if form_data.get("del_channels") or form_data.get("del_categories"):
         tgt_chan_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers)
@@ -134,7 +163,7 @@ def run_cloning_task(token, source_id, target_id, form_data):
                     if del_res.status_code == 429:
                         time.sleep(float(del_res.json().get("retry_after", 2)))
                         requests.delete(f"https://discord.com/api/v10/channels/{c['id']}", headers=headers)
-                    print(f"🗑️ Deleted {'Category' if is_cat else 'Channel'}: {c['name']}")
+                    log_message(f"🗑️ Deleted {'Category' if is_cat else 'Channel'}: {c['name']}")
                     time.sleep(0.3)
 
     if form_data.get("del_roles"):
@@ -146,12 +175,12 @@ def run_cloning_task(token, source_id, target_id, form_data):
                     if del_res.status_code == 429:
                         time.sleep(float(del_res.json().get("retry_after", 2)))
                         requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{r['id']}", headers=headers)
-                    print(f"🗑️ Deleted Role: {r['name']}")
+                    log_message(f"🗑️ Deleted Role: {r['name']}")
                     time.sleep(0.3)
 
     role_map = {}
     if form_data.get("clone_roles"):
-        print("🎭 Cloning Roles...")
+        log_message("🎭 Cloning Roles...")
         src_roles_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
         if src_roles_res.status_code == 200:
             roles = sorted(src_roles_res.json(), key=lambda x: x.get('position', 0))
@@ -170,11 +199,11 @@ def run_cloning_task(token, source_id, target_id, form_data):
                 if r_create.status_code in [200, 201]:
                     new_role = r_create.json()
                     role_map[r['id']] = new_role['id']
-                    print(f"✨ Created Role: {r['name']}")
+                    log_message(f"✨ Created Role: {r['name']}")
                 time.sleep(0.3)
 
     if form_data.get("clone_channels") or form_data.get("clone_categories"):
-        print("📁 Cloning Categories & Channels...")
+        log_message("📁 Cloning Categories & Channels...")
         channels_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/channels", headers=headers)
         if channels_res.status_code == 200:
             channels = sorted(channels_res.json(), key=lambda x: x.get('position', 0))
@@ -192,7 +221,7 @@ def run_cloning_task(token, source_id, target_id, form_data):
                         if cr.status_code in [200, 201]:
                             new_cat = cr.json()
                             category_map[c['id']] = new_cat['id']
-                            print(f"📁 Created Category: {c['name']}")
+                            log_message(f"📁 Created Category: {c['name']}")
                         time.sleep(0.3)
 
             if form_data.get("clone_channels"):
@@ -221,40 +250,49 @@ def run_cloning_task(token, source_id, target_id, form_data):
                             cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
 
                         if cr.status_code in [200, 201]:
-                            print(f"💬 Created Channel: {c['name']}")
+                            log_message(f"💬 Created Channel: {c['name']}")
                         time.sleep(0.3)
 
-    print("🎉 Spider-Cloning complete successfully!")
+    log_message("🎉 Spider-Cloning complete successfully!")
+    is_cloning = False
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/")
 def index():
-    logs = None
-    if request.method == "POST":
-        token = request.form.get("token")
-        source_id = request.form.get("source_id")
-        target_id = request.form.get("target_id")
-        
-        form_data = {
-            "del_channels": request.form.get("del_channels"),
-            "del_categories": request.form.get("del_categories"),
-            "del_roles": request.form.get("del_roles"),
-            "clone_channels": request.form.get("clone_channels"),
-            "clone_categories": request.form.get("clone_categories"),
-            "clone_roles": request.form.get("clone_roles"),
-            "clone_perms": request.form.get("clone_perms")
-        }
+    return render_template_string(HTML_TEMPLATE)
 
-        # Run cloning in a background thread so the page loads instantly!
-        thread = threading.Thread(target=run_cloning_task, args=(token, source_id, target_id, form_data))
-        thread.start()
+@app.route("/clone", methods=["POST"])
+def clone_action():
+    global is_cloning
+    if is_cloning:
+        return "Cloning already in progress!", 400
 
-        logs = [
-            "🚀 Cloning protocol successfully dispatched!",
-            "⚡ Check your Render dashboard live logs right now to watch items get deleted and created in real time!"
-        ]
-        return render_template_string(HTML_TEMPLATE, logs=logs)
+    token = request.form.get("token")
+    source_id = request.form.get("source_id")
+    target_id = request.form.get("target_id")
+    
+    form_data = {
+        "del_channels": request.form.get("del_channels"),
+        "del_categories": request.form.get("del_categories"),
+        "del_roles": request.form.get("del_roles"),
+        "clone_channels": request.form.get("clone_channels"),
+        "clone_categories": request.form.get("clone_categories"),
+        "clone_roles": request.form.get("clone_roles"),
+        "clone_perms": request.form.get("clone_perms")
+    }
 
-    return render_template_string(HTML_TEMPLATE, logs=logs)
+    thread = threading.Thread(target=run_cloning_task, args=(token, source_id, target_id, form_data))
+    thread.start()
+    
+    return """
+    <script>
+        alert("Cloning initiated successfully!");
+        window.location.href = "/";
+    </script>
+    """
+
+@app.route("/logs")
+def get_logs():
+    return jsonify({"logs": current_logs, "active": is_cloning})
 
 if __name__ == "__main__":
     import os
