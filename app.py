@@ -193,7 +193,7 @@ def clone_server():
                         pass
                     time.sleep(0.02)
 
-        # 2. Resilient Role Purge with Non-Blocking Skip on Hierarchy Limits
+        # 2. Resilient Role Purge
         if del_roles:
             yield "[+] Purging target roles safely...\n"
             for pass_num in range(3):
@@ -208,18 +208,15 @@ def clone_server():
                                 if res.status_code in [200, 204]:
                                     deleted_any = True
                                     yield f"[X] Deleted role: {role['name']}\n"
-                                elif res.status_code == 403:
-                                    # Skip roles locked above token account hierarchy without freezing
-                                    pass
                             except:
                                 pass
-                            time.sleep(0.04)
+                            time.sleep(0.03)
                     if not deleted_any:
                         break
 
-        # 3. Clone Roles (Safely bypassing uncreatable hierarchy thresholds)
+        # 3. Clone Roles with Detailed Status Output
         if c_roles:
-            yield "[+] Creating roles in order...\n"
+            yield "[+] Creating roles in order (Diagnostic Mode)...\n"
             r_source_roles = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
             if r_source_roles.status_code == 200:
                 source_roles = sorted([r for r in r_source_roles.json() if not r.get("managed")], key=lambda x: x['position'])
@@ -243,10 +240,10 @@ def clone_server():
                         if res.status_code in [200, 201]:
                             yield f"[V] Created role: {role['name']}\n"
                         else:
-                            yield f"[-] Skipped role (Hierarchy lock): {role['name']}\n"
-                    except:
-                        pass
-                    time.sleep(0.05)
+                            yield f"[ERR {res.status_code}] Failed role: {role['name']} -> {res.text[:60]}\n"
+                    except Exception as e:
+                        yield f"[-] Exception on role {role['name']}\n"
+                    time.sleep(0.04)
 
         # 4. Clone Channels & Categories
         if c_channels:
@@ -262,7 +259,7 @@ def clone_server():
                             cat_map[cat['id']] = res.json()['id']
                     except:
                         pass
-                    time.sleep(0.04)
+                    time.sleep(0.03)
                 for ch in sorted([c for c in channels if c['type'] != 4], key=lambda x: x.get('position', 0)):
                     payload = {"name": ch['name'], "type": ch['type'], "topic": ch.get('topic'), "nsfw": ch.get('nsfw', False)}
                     if ch.get('parent_id') in cat_map:
@@ -271,7 +268,7 @@ def clone_server():
                         requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload, timeout=2)
                     except:
                         pass
-                    time.sleep(0.04)
+                    time.sleep(0.03)
 
         # 5. Clone Emojis
         if c_emojis:
@@ -286,7 +283,7 @@ def clone_server():
                             requests.post(f"https://discord.com/api/v10/guilds/{target_id}/emojis", headers=headers, json={"name": emo['name'], "image": b64_img}, timeout=2)
                     except:
                         pass
-                    time.sleep(0.05)
+                    time.sleep(0.04)
 
         # 6. Clone Settings
         if c_settings:
@@ -327,7 +324,7 @@ def mass_join():
                 success_count += 1
         except:
             pass
-        time.sleep(0.04)
+        time.sleep(0.03)
         
     return redirect(f"/mass-join-panel?msg=Successfully forced {success_count} authorized players into server!")
 
