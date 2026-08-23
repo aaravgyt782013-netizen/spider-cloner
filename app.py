@@ -183,7 +183,7 @@ def clone_server():
         
         # 1. Delete Channels safely
         if del_channels:
-            yield "[+] Deleting channels...\n"
+            yield "[+] Deleting target channels...\n"
             r_tc = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers)
             if r_tc.status_code == 200:
                 for ch in r_tc.json():
@@ -193,24 +193,30 @@ def clone_server():
                         pass
                     time.sleep(0.02)
 
-        # 2. Delete Roles safely (skipping hierarchy blocks instantly)
+        # 2. Aggressive Multi-Pass Role Purge (Bypasses hanging locks)
         if del_roles:
-            yield "[+] Deleting roles safely...\n"
-            r_tr = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
-            if r_tr.status_code == 200:
-                for role in sorted(r_tr.json(), key=lambda x: x['position'], reverse=True):
-                    if role['name'] != "@everyone" and not role.get('managed') and not role.get('bot_id'):
-                        try:
-                            res = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers, timeout=2)
-                            if res.status_code == 429:
-                                time.sleep(1.0)
-                        except:
-                            pass
-                        time.sleep(0.02)
+            yield "[+] Purging target roles completely...\n"
+            for pass_num in range(3):
+                r_tr = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
+                if r_tr.status_code == 200:
+                    roles = r_tr.json()
+                    deleted_any = False
+                    for role in sorted(roles, key=lambda x: x['position'], reverse=True):
+                        if role['name'] != "@everyone" and not role.get('managed') and not role.get('bot_id') and not role.get('tags'):
+                            try:
+                                res = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers, timeout=2)
+                                if res.status_code in [200, 204]:
+                                    deleted_any = True
+                                    yield f"[X] Deleted role: {role['name']}\n"
+                            except:
+                                pass
+                            time.sleep(0.04)
+                    if not deleted_any:
+                        break
 
-        # 3. Clone Roles with Safe Order and Rate-Limit Handlers
+        # 3. Clone Roles in exact matching sequence
         if c_roles:
-            yield "[+] Creating roles in normal order...\n"
+            yield "[+] Creating roles in order...\n"
             r_source_roles = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
             if r_source_roles.status_code == 200:
                 source_roles = sorted([r for r in r_source_roles.json() if not r.get("managed")], key=lambda x: x['position'])
@@ -233,8 +239,6 @@ def clone_server():
                         res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload, timeout=2)
                         if res.status_code in [200, 201]:
                             yield f"[V] Created role: {role['name']}\n"
-                        elif res.status_code == 429:
-                            time.sleep(1.5)
                     except:
                         pass
                     time.sleep(0.05)
@@ -253,7 +257,7 @@ def clone_server():
                             cat_map[cat['id']] = res.json()['id']
                     except:
                         pass
-                    time.sleep(0.05)
+                    time.sleep(0.04)
                 for ch in sorted([c for c in channels if c['type'] != 4], key=lambda x: x.get('position', 0)):
                     payload = {"name": ch['name'], "type": ch['type'], "topic": ch.get('topic'), "nsfw": ch.get('nsfw', False)}
                     if ch.get('parent_id') in cat_map:
@@ -262,7 +266,7 @@ def clone_server():
                         requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload, timeout=2)
                     except:
                         pass
-                    time.sleep(0.05)
+                    time.sleep(0.04)
 
         # 5. Clone Emojis
         if c_emojis:
@@ -318,7 +322,7 @@ def mass_join():
                 success_count += 1
         except:
             pass
-        time.sleep(0.05)
+        time.sleep(0.04)
         
     return redirect(f"/mass-join-panel?msg=Successfully forced {success_count} authorized players into server!")
 
