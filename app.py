@@ -190,22 +190,24 @@ def clone_server():
                     requests.delete(f"https://discord.com/api/v10/channels/{ch['id']}", headers=headers)
                     time.sleep(0.05)
 
-        # 2. Delete Roles (Top-down)
+        # 2. Delete Roles (Top-down with multiple passes to clear stubborn ones)
         if del_roles:
             yield "[+] Deleting existing target roles...\n"
-            r_tr = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
-            if r_tr.status_code == 200:
-                for role in sorted(r_tr.json(), key=lambda x: x['position'], reverse=True):
-                    if role['name'] != "@everyone" and not role.get('managed'):
-                        requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers)
-                        time.sleep(0.05)
+            for _ in range(2):
+                r_tr = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
+                if r_tr.status_code == 200:
+                    for role in sorted(r_tr.json(), key=lambda x: x['position'], reverse=True):
+                        if role['name'] != "@everyone" and not role.get('managed') and not role.get('bot_id'):
+                            requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers)
+                            time.sleep(0.05)
 
-        # 3. Clone Roles in Correct Ascending Order (Hierarchy fix)
+        # 3. Clone Roles in Correct Top-to-Bottom Stack Order
         if c_roles:
-            yield "[+] Creating roles in order...\n"
+            yield "[+] Creating roles in correct order...\n"
             r_source_roles = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
             if r_source_roles.status_code == 200:
-                source_roles = sorted([r for r in r_source_roles.json() if not r.get("managed")], key=lambda x: x['position'])
+                # Reverse sort so highest roles are created first, pushing lower roles down naturally
+                source_roles = sorted([r for r in r_source_roles.json() if not r.get("managed")], key=lambda x: x['position'], reverse=True)
                 for role in source_roles:
                     if role['name'] == "@everyone":
                         requests.patch(f"https://discord.com/api/v10/guilds/{target_id}/roles/{target_id}", headers=headers, json={"permissions": str(role['permissions'])})
