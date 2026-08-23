@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, render_template_string
 import requests
 import time
 
@@ -76,101 +76,50 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <body>
     <div class="container">
         <h2>🕷️ SPIDEY CLONER 🕸️</h2>
-        <div id="cloneForm">
+        <form method="POST" action="/clone">
             <label>User Token</label>
-            <input type="password" id="token" placeholder="Paste your user token...">
+            <input type="password" name="token" required placeholder="Paste your user token...">
             
             <label>Source Guild ID (Copy From)</label>
-            <input type="text" id="source_id" placeholder="Source ID">
+            <input type="text" name="source_id" required placeholder="Source ID">
             
             <label>Target Guild ID (Paste To)</label>
-            <input type="text" id="target_id" placeholder="Target ID">
+            <input type="text" name="target_id" required placeholder="Target ID">
             
             <label>Target Destruction (What to Delete First)</label>
             <div class="grid-section">
-                <label><input type="checkbox" id="del_channels" checked> Channels</label>
-                <label><input type="checkbox" id="del_categories" checked> Categories</label>
-                <label><input type="checkbox" id="del_roles"> Roles</label>
+                <label><input type="checkbox" name="del_channels" checked> Channels</label>
+                <label><input type="checkbox" name="del_categories" checked> Categories</label>
+                <label><input type="checkbox" name="del_roles"> Roles</label>
             </div>
 
             <label>Replication Protocol (What to Clone)</label>
             <div class="grid-section">
-                <label><input type="checkbox" id="clone_channels" checked> Channels</label>
-                <label><input type="checkbox" id="clone_categories" checked> Categories</label>
-                <label><input type="checkbox" id="clone_roles"> Roles</label>
-                <label><input type="checkbox" id="clone_perms"> Overwrites</label>
+                <label><input type="checkbox" name="clone_channels" checked> Channels</label>
+                <label><input type="checkbox" name="clone_categories" checked> Categories</label>
+                <label><input type="checkbox" name="clone_roles"> Roles</label>
+                <label><input type="checkbox" name="clone_perms"> Overwrites</label>
             </div>
             
-            <button id="cloneBtn">INITIATE WEB-CLONE</button>
-        </div>
+            <button type="submit">INITIATE WEB-CLONE</button>
+        </form>
         
         <div class="logs-title">SYSTEM OUTPUT LOGS</div>
-        <pre id="logs">System idle. Standing by for command...</pre>
+        <pre>{{ logs | join('\n') if logs else "System idle. Standing by for command..." }}</pre>
     </div>
-
-    <script>
-        document.getElementById('cloneBtn').addEventListener('click', async function() {
-            const token = document.getElementById('token').value.trim();
-            const source_id = document.getElementById('source_id').value.trim();
-            const target_id = document.getElementById('target_id').value.trim();
-            const logBox = document.getElementById('logs');
-
-            if (!token || !source_id || !target_id) {
-                logBox.innerText = "[!] Error: Please fill in Token, Source ID, and Target ID fields!";
-                return;
-            }
-
-            const payload = {
-                token: token,
-                source_id: source_id,
-                target_id: target_id,
-                del_channels: document.getElementById('del_channels').checked,
-                del_categories: document.getElementById('del_categories').checked,
-                del_roles: document.getElementById('del_roles').checked,
-                clone_channels: document.getElementById('clone_channels').checked,
-                clone_categories: document.getElementById('clone_categories').checked,
-                clone_roles: document.getElementById('clone_roles').checked,
-                clone_perms: document.getElementById('clone_perms').checked,
-            };
-
-            logBox.innerText = "[~] Transmission started... contacting web server...\n";
-
-            try {
-                const response = await fetch('/clone', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) {
-                    throw new Error(`Server returned status ${response.status} (${response.statusText})`);
-                }
-
-                const result = await response.json();
-                if (result.logs && Array.isArray(result.logs)) {
-                    logBox.innerText = result.logs.join("\n");
-                } else {
-                    logBox.innerText = "[!] Received empty response structure from server.";
-                }
-            } catch (err) {
-                logBox.innerText += "\n[!] Critical execution error:\n" + err.message;
-            }
-        });
-    </script>
 </body>
 </html>
 """
 
 @app.route("/")
 def index():
-    return HTML_TEMPLATE
+    return render_template_string(HTML_TEMPLATE, logs=None)
 
 @app.route("/clone", methods=["POST"])
 def clone():
-    data = request.json
-    token = data.get("token")
-    source_id = data.get("source_id")
-    target_id = data.get("target_id")
+    token = request.form.get("token")
+    source_id = request.form.get("source_id")
+    target_id = request.form.get("target_id")
     
     headers = {"Authorization": token, "Content-Type": "application/json"}
     logs = ["🕸️ Connecting to Discord API..."]
@@ -178,26 +127,25 @@ def clone():
     src_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}", headers=headers)
     if src_res.status_code != 200:
         logs.append(f"❌ Error accessing source server: {src_res.text}")
-        return jsonify({"logs": logs})
+        return render_template_string(HTML_TEMPLATE, logs=logs)
     
     logs.append(f"✅ Target Source Acquired: {src_res.json().get('name')}")
     logs.append("🧹 Cleaning target server safely...")
 
-    if data.get("del_channels") or data.get("del_categories"):
+    if request.form.get("del_channels") or request.form.get("del_categories"):
         tgt_chan_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers)
         if tgt_chan_res.status_code == 200:
             for c in tgt_chan_res.json():
                 is_cat = (c['type'] == 4)
-                if (is_cat and data.get("del_categories")) or (not is_cat and data.get("del_channels")):
+                if (is_cat and request.form.get("del_categories")) or (not is_cat and request.form.get("del_channels")):
                     del_res = requests.delete(f"https://discord.com/api/v10/channels/{c['id']}", headers=headers)
                     if del_res.status_code == 429:
                         time.sleep(float(del_res.json().get("retry_after", 2)))
                         requests.delete(f"https://discord.com/api/v10/channels/{c['id']}", headers=headers)
-                    item_type = "Category" if is_cat else "Channel"
-                    logs.append(f"🗑️ Deleted {item_type}: {c['name']}")
+                    logs.append(f"🗑️ Deleted {'Category' if is_cat else 'Channel'}: {c['name']}")
                     time.sleep(0.4)
 
-    if data.get("del_roles"):
+    if request.form.get("del_roles"):
         tgt_roles_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
         if tgt_roles_res.status_code == 200:
             for r in tgt_roles_res.json():
@@ -210,7 +158,7 @@ def clone():
                     time.sleep(0.4)
 
     role_map = {}
-    if data.get("clone_roles"):
+    if request.form.get("clone_roles"):
         logs.append("🎭 Cloning Roles...")
         src_roles_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
         if src_roles_res.status_code == 200:
@@ -233,14 +181,14 @@ def clone():
                     logs.append(f"✨ Created Role: {r['name']}")
                 time.sleep(0.4)
 
-    if data.get("clone_channels") or data.get("clone_categories"):
+    if request.form.get("clone_channels") or request.form.get("clone_categories"):
         logs.append("📁 Cloning Categories & Channels...")
         channels_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/channels", headers=headers)
         if channels_res.status_code == 200:
             channels = sorted(channels_res.json(), key=lambda x: x.get('position', 0))
             category_map = {}
 
-            if data.get("clone_categories"):
+            if request.form.get("clone_categories"):
                 for c in channels:
                     if c['type'] == 4:
                         payload = {"name": c['name'], "type": 4}
@@ -255,7 +203,7 @@ def clone():
                             logs.append(f"📁 Created Category: {c['name']}")
                         time.sleep(0.4)
 
-            if data.get("clone_channels"):
+            if request.form.get("clone_channels"):
                 for c in channels:
                     if c['type'] != 4:
                         payload = {
@@ -266,7 +214,7 @@ def clone():
                         if c.get("parent_id") and c["parent_id"] in category_map:
                             payload["parent_id"] = category_map[c["parent_id"]]
                         
-                        if data.get("clone_perms") and "permission_overwrites" in c:
+                        if request.form.get("clone_perms") and "permission_overwrites" in c:
                             new_overwrites = []
                             for ow in c["permission_overwrites"]:
                                 if ow['type'] == 0 and ow['id'] in role_map:
@@ -285,7 +233,7 @@ def clone():
                         time.sleep(0.4)
 
     logs.append("🎉 Spider-Cloning complete successfully!")
-    return jsonify({"logs": logs})
+    return render_template_string(HTML_TEMPLATE, logs=logs)
 
 if __name__ == "__main__":
     import os
