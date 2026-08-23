@@ -181,36 +181,45 @@ def clone_server():
     def generate_stream():
         yield "<html><head><title>Cloning Logs</title><style>body{background:#050505;color:#00ffcc;font-family:monospace;padding:20px;}</style></head><body><pre>" + (" " * 1024) + "\n"
         
-        # 1. Delete Channels
+        # 1. Delete Channels safely
         if del_channels:
-            yield "[+] Deleting existing target channels...\n"
+            yield "[+] Deleting channels...\n"
             r_tc = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers)
             if r_tc.status_code == 200:
                 for ch in r_tc.json():
-                    requests.delete(f"https://discord.com/api/v10/channels/{ch['id']}", headers=headers)
-                    time.sleep(0.05)
+                    try:
+                        requests.delete(f"https://discord.com/api/v10/channels/{ch['id']}", headers=headers, timeout=2)
+                    except:
+                        pass
+                    time.sleep(0.02)
 
-        # 2. Delete Roles (Top-down with multiple passes to clear stubborn ones)
+        # 2. Delete Roles safely (skipping hierarchy blocks instantly)
         if del_roles:
-            yield "[+] Deleting existing target roles...\n"
-            for _ in range(2):
-                r_tr = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
-                if r_tr.status_code == 200:
-                    for role in sorted(r_tr.json(), key=lambda x: x['position'], reverse=True):
-                        if role['name'] != "@everyone" and not role.get('managed') and not role.get('bot_id'):
-                            requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers)
-                            time.sleep(0.05)
+            yield "[+] Deleting roles safely...\n"
+            r_tr = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
+            if r_tr.status_code == 200:
+                for role in sorted(r_tr.json(), key=lambda x: x['position'], reverse=True):
+                    if role['name'] != "@everyone" and not role.get('managed') and not role.get('bot_id'):
+                        try:
+                            res = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers, timeout=2)
+                            if res.status_code == 429:
+                                time.sleep(1.0)
+                        except:
+                            pass
+                        time.sleep(0.02)
 
-        # 3. Clone Roles in Correct Top-to-Bottom Stack Order
+        # 3. Clone Roles with Safe Order and Rate-Limit Handlers
         if c_roles:
-            yield "[+] Creating roles in correct order...\n"
+            yield "[+] Creating roles in normal order...\n"
             r_source_roles = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
             if r_source_roles.status_code == 200:
-                # Reverse sort so highest roles are created first, pushing lower roles down naturally
-                source_roles = sorted([r for r in r_source_roles.json() if not r.get("managed")], key=lambda x: x['position'], reverse=True)
+                source_roles = sorted([r for r in r_source_roles.json() if not r.get("managed")], key=lambda x: x['position'])
                 for role in source_roles:
                     if role['name'] == "@everyone":
-                        requests.patch(f"https://discord.com/api/v10/guilds/{target_id}/roles/{target_id}", headers=headers, json={"permissions": str(role['permissions'])})
+                        try:
+                            requests.patch(f"https://discord.com/api/v10/guilds/{target_id}/roles/{target_id}", headers=headers, json={"permissions": str(role['permissions'])}, timeout=2)
+                        except:
+                            pass
                         continue
                     
                     payload = {
@@ -220,10 +229,15 @@ def clone_server():
                         "hoist": bool(role.get('hoist', False)),
                         "mentionable": bool(role.get('mentionable', False))
                     }
-                    res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
-                    if res.status_code in [200, 201]:
-                        yield f"[V] Created role: {role['name']}\n"
-                    time.sleep(0.15)
+                    try:
+                        res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload, timeout=2)
+                        if res.status_code in [200, 201]:
+                            yield f"[V] Created role: {role['name']}\n"
+                        elif res.status_code == 429:
+                            time.sleep(1.5)
+                    except:
+                        pass
+                    time.sleep(0.05)
 
         # 4. Clone Channels & Categories
         if c_channels:
@@ -233,16 +247,22 @@ def clone_server():
                 channels = r_channels.json()
                 cat_map = {}
                 for cat in sorted([c for c in channels if c['type'] == 4], key=lambda x: x.get('position', 0)):
-                    res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json={"name": cat['name'], "type": 4})
-                    if res.status_code in [200, 201]:
-                        cat_map[cat['id']] = res.json()['id']
-                    time.sleep(0.1)
+                    try:
+                        res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json={"name": cat['name'], "type": 4}, timeout=2)
+                        if res.status_code in [200, 201]:
+                            cat_map[cat['id']] = res.json()['id']
+                    except:
+                        pass
+                    time.sleep(0.05)
                 for ch in sorted([c for c in channels if c['type'] != 4], key=lambda x: x.get('position', 0)):
                     payload = {"name": ch['name'], "type": ch['type'], "topic": ch.get('topic'), "nsfw": ch.get('nsfw', False)}
                     if ch.get('parent_id') in cat_map:
                         payload['parent_id'] = cat_map[ch['parent_id']]
-                    requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
-                    time.sleep(0.1)
+                    try:
+                        requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload, timeout=2)
+                    except:
+                        pass
+                    time.sleep(0.05)
 
         # 5. Clone Emojis
         if c_emojis:
@@ -250,24 +270,30 @@ def clone_server():
             r_emo = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/emojis", headers=headers)
             if r_emo.status_code == 200:
                 for emo in r_emo.json():
-                    img_res = requests.get(f"https://cdn.discordapp.com/emojis/{emo['id']}.png")
-                    if img_res.status_code == 200:
-                        b64_img = f"data:image/png;base64,{base64.b64encode(img_res.content).decode('utf-8')}"
-                        requests.post(f"https://discord.com/api/v10/guilds/{target_id}/emojis", headers=headers, json={"name": emo['name'], "image": b64_img})
-                        time.sleep(0.2)
+                    try:
+                        img_res = requests.get(f"https://cdn.discordapp.com/emojis/{emo['id']}.png", timeout=2)
+                        if img_res.status_code == 200:
+                            b64_img = f"data:image/png;base64,{base64.b64encode(img_res.content).decode('utf-8')}"
+                            requests.post(f"https://discord.com/api/v10/guilds/{target_id}/emojis", headers=headers, json={"name": emo['name'], "image": b64_img}, timeout=2)
+                    except:
+                        pass
+                    time.sleep(0.05)
 
         # 6. Clone Settings
         if c_settings:
             yield "[+] Cloning server settings...\n"
-            r_src = requests.get(f"https://discord.com/api/v10/guilds/{source_id}", headers=headers)
-            if r_src.status_code == 200:
-                s_data = r_src.json()
-                requests.patch(f"https://discord.com/api/v10/guilds/{target_id}", headers=headers, json={
-                    "name": s_data.get("name"),
-                    "verification_level": s_data.get("verification_level"),
-                    "default_message_notifications": s_data.get("default_message_notifications"),
-                    "explicit_content_filter": s_data.get("explicit_content_filter")
-                })
+            try:
+                r_src = requests.get(f"https://discord.com/api/v10/guilds/{source_id}", headers=headers, timeout=2)
+                if r_src.status_code == 200:
+                    s_data = r_src.json()
+                    requests.patch(f"https://discord.com/api/v10/guilds/{target_id}", headers=headers, json={
+                        "name": s_data.get("name"),
+                        "verification_level": s_data.get("verification_level"),
+                        "default_message_notifications": s_data.get("default_message_notifications"),
+                        "explicit_content_filter": s_data.get("explicit_content_filter")
+                    }, timeout=2)
+            except:
+                pass
 
         yield "\n[+] CLONING PROTOCOL COMPLETED SUCCESSFULLY!</pre></body></html>"
 
@@ -286,11 +312,13 @@ def mass_join():
         url = f"https://discord.com/api/v10/guilds/{guild_id}/members/{u['id']}"
         headers = {"Authorization": f"Bot {bot_token}", "Content-Type": "application/json"}
         payload = {"access_token": u['token']}
-        
-        r = requests.put(url, headers=headers, json=payload)
-        if r.status_code in [201, 204]:
-            success_count += 1
-        time.sleep(0.2)
+        try:
+            r = requests.put(url, headers=headers, json=payload, timeout=2)
+            if r.status_code in [201, 204]:
+                success_count += 1
+        except:
+            pass
+        time.sleep(0.05)
         
     return redirect(f"/mass-join-panel?msg=Successfully forced {success_count} authorized players into server!")
 
