@@ -179,8 +179,9 @@ def clone_server():
     headers = {"Authorization": token, "Content-Type": "application/json"}
     
     def generate_stream():
+        # Send initial HTML shell with padding spaces to bypass proxy buffering
         yield "<html><head><title>Cloning Logs</title><link href='https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap' rel='stylesheet'><style>body{background:#050505;color:#00ffcc;font-family:'Inter',sans-serif;padding:20px;}pre{background:#0b0b0e;padding:15px;border:1px solid #8b0000;border-radius:8px;max-height:80vh;overflow-y:auto;font-size:12px;}</style></head><body>"
-        yield "<h2>⚡ SPIDEY CLONER EXECUTION LOGS</h2><pre>"
+        yield "<h2>⚡ SPIDEY CLONER EXECUTION LOGS</h2><pre>" + (" " * 1024) + "\n"
         
         # 1. Delete Channels
         if del_channels:
@@ -190,6 +191,7 @@ def clone_server():
                 for ch in r_tc.json():
                     requests.delete(f"https://discord.com/api/v10/channels/{ch['id']}", headers=headers)
                     yield f"[-] Deleted channel: {ch['name']}\n"
+                    time.sleep(0.1)
 
         # 2. Delete Roles
         if del_roles:
@@ -200,6 +202,7 @@ def clone_server():
                     if role['name'] != "@everyone" and not role.get('managed'):
                         requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers)
                         yield f"[-] Deleted role: {role['name']}\n"
+                        time.sleep(0.1)
 
         # 3. Clone Roles with Ordering
         role_map = {}
@@ -223,6 +226,7 @@ def clone_server():
                         new_role = cr.json()
                         role_map[role['id']] = new_role['id']
                         yield f"[V] Created role: {role['name']}\n"
+                    time.sleep(0.1)
 
         # 4. Clone Channels & Categories
         if c_channels:
@@ -241,6 +245,7 @@ def clone_server():
                         new_cat = cc.json()
                         cat_map[cat['id']] = new_cat['id']
                         yield f"[V] Created Category: {cat['name']}\n"
+                    time.sleep(0.1)
                     
                 for ch in sorted(other_channels, key=lambda x: x.get('position', 0)):
                     payload = {
@@ -259,6 +264,7 @@ def clone_server():
                         yield f"[V] Created Channel: {ch['name']}\n"
                     else:
                         yield f"[X] Failed Channel {ch['name']}\n"
+                    time.sleep(0.1)
 
         # 5. Clone Emojis
         if c_emojis:
@@ -273,6 +279,7 @@ def clone_server():
                         ce = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/emojis", headers=headers, json=payload)
                         if ce.status_code in [200, 201]:
                             yield f"[V] Cloned Emoji: {emo['name']}\n"
+                        time.sleep(0.2)
 
         # 6. Clone Settings
         if c_settings:
@@ -310,7 +317,7 @@ def mass_join():
         r = requests.put(url, headers=headers, json=payload)
         if r.status_code in [201, 204]:
             success_count += 1
-        time.sleep(0.3)
+        time.sleep(0.2)
         
     return redirect(f"/mass-join-panel?msg=Successfully forced {success_count} authorized players into server!")
 
