@@ -1,2 +1,1 @@
-web: python api/index.py
-
+web: python app.py
