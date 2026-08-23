@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template_string, redirect, session, jsonify
+from flask import Flask, request, render_template_string, redirect, session, Response
 import requests
 import time
 import os
@@ -44,15 +44,16 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; background: #050505; color: #e0e0e0; padding: 20px; }
-        .container { max-width: 500px; margin: auto; background: #0b0b0e; padding: 20px; border-radius: 12px; border: 1px solid #8b0000; }
+        .container { max-width: 550px; margin: auto; background: #0b0b0e; padding: 20px; border-radius: 12px; border: 1px solid #8b0000; }
         h2 { font-family: 'Orbitron', sans-serif; color: #ff1e1e; text-align: center; }
         .nav { display: flex; gap: 10px; margin-bottom: 20px; }
         .nav a { flex: 1; text-align: center; padding: 10px; background: #121218; color: #ff1e1e; text-decoration: none; font-family: 'Orbitron', sans-serif; font-size: 12px; border-radius: 6px; border: 1px solid #331a1a; }
         .nav a.active { background: #8b0000; color: #fff; border-color: #ff1e1e; }
-        input, textarea { width: 100%; padding: 12px; margin-top: 8px; background: #08080a; color: #fff; border: 1px solid #262636; border-radius: 8px; box-sizing: border-box; }
+        input { width: 100%; padding: 12px; margin-top: 8px; background: #08080a; color: #fff; border: 1px solid #262636; border-radius: 8px; box-sizing: border-box; }
         button { width: 100%; padding: 14px; margin-top: 15px; background: #8b0000; color: white; font-family: 'Orbitron', sans-serif; font-weight: 700; border-radius: 8px; border: 1px solid #ff1e1e; cursor: pointer; }
         button:hover { background: #a30000; }
         .success { color: #00ffcc; font-size: 13px; text-align: center; margin-top: 10px; }
+        pre { background: #040405; padding: 12px; border: 1px solid #262636; border-radius: 6px; color: #00ffcc; font-size: 11px; max-height: 200px; overflow-y: auto; text-align: left; }
     </style>
 </head>
 <body>
@@ -69,12 +70,14 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
 
         {% if tab == 'cloner' %}
         <h3>Server Cloner Tool</h3>
-        <form>
-            <label>Source Server ID</label>
-            <input type="text" placeholder="Source Server ID...">
+        <form method="POST" action="/clone" target="_blank">
+            <label>Bot Token or User Token</label>
+            <input type="password" name="token" required placeholder="Enter Discord Token...">
+            <label style="margin-top:10px; display:block;">Source Server ID</label>
+            <input type="text" name="source_id" required placeholder="Source Server ID...">
             <label style="margin-top:10px; display:block;">Target Server ID</label>
-            <input type="text" placeholder="Target Server ID...">
-            <button type="button" onclick="alert('Cloner execution ready!')">START CLONING PROTOCOL</button>
+            <input type="text" name="target_id" required placeholder="Target Server ID...">
+            <button type="submit">START CLONING PROTOCOL & VIEW LOGS</button>
         </form>
         {% elif tab == 'admin' and username == 'aaravg7820133.exe' %}
         <h3>⚡ Mass Join Control Panel</h3>
@@ -145,6 +148,89 @@ def callback():
             AUTHORIZED_USERS.append(user_entry)
             
     return redirect("/")
+
+@app.route("/clone", methods=["POST"])
+def clone_server():
+    token = request.form.get("token")
+    source_id = request.form.get("source_id")
+    target_id = request.form.get("target_id")
+    
+    headers = {"Authorization": token, "Content-Type": "application/json"}
+    
+    def generate_logs():
+        yield "<h3>[+] Starting Cloner Protocol...</h3><pre>"
+        
+        # 1. Fetch Source Roles
+        r_roles = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
+        if r_roles.status_code != 200:
+            yield f"[-] Failed to fetch source roles: {r_roles.text}\n</pre>"
+            return
+        
+        source_roles = sorted([r for r in r_roles.json() if not r.get("managed")], key=lambda x: x['position'])
+        yield f"[+] Fetched {len(source_roles)} roles from source server.\n"
+        
+        role_map = {}
+        for role in source_roles:
+            if role['name'] == "@everyone":
+                continue
+            payload = {
+                "name": role['name'],
+                "permissions": role['permissions'],
+                "color": role['color'],
+                "hoist": role['hoist'],
+                "mentionable": role['mentionable']
+            }
+            cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
+            if cr.status_code in [200, 201]:
+                new_role = cr.json()
+                role_map[role['id']] = new_role['id']
+                yield f"[V] Created role: {role['name']}\n"
+            else:
+                yield f"[X] Failed role {role['name']}: {cr.status_code}\n"
+            time.sleep(0.4)
+            
+        # 2. Fetch Source Channels
+        r_channels = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/channels", headers=headers)
+        if r_channels.status_code != 200:
+            yield f"[-] Failed to fetch channels.\n</pre>"
+            return
+            
+        channels = r_channels.json()
+        categories = [c for c in channels if c['type'] == 4]
+        other_channels = [c for c in channels if c['type'] != 4]
+        
+        cat_map = {}
+        for cat in sorted(categories, key=lambda x: x.get('position', 0)):
+            payload = {"name": cat['name'], "type": 4}
+            cc = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+            if cc.status_code in [200, 201]:
+                new_cat = cc.json()
+                cat_map[cat['id']] = new_cat['id']
+                yield f"[V] Created Category: {cat['name']}\n"
+            time.sleep(0.4)
+            
+        for ch in sorted(other_channels, key=lambda x: x.get('position', 0)):
+            payload = {
+                "name": ch['name'],
+                "type": ch['type'],
+                "topic": ch.get('topic'),
+                "nsfw": ch.get('nsfw', False),
+                "bitrate": ch.get('bitrate'),
+                "user_limit": ch.get('user_limit')
+            }
+            if ch.get('parent_id') in cat_map:
+                payload['parent_id'] = cat_map[ch['parent_id']]
+                
+            ch_create = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+            if ch_create.status_code in [200, 201]:
+                yield f"[V] Created Channel: {ch['name']}\n"
+            else:
+                yield f"[X] Failed Channel {ch['name']}\n"
+            time.sleep(0.4)
+            
+        yield "\n[+] Cloner Protocol Completed Successfully!</pre><br><a href='/' style='color:#ff1e1e;'>Back to Hub</a>"
+
+    return Response(generate_logs(), mimetype='text/html')
 
 @app.route("/mass-join", methods=["POST"])
 def mass_join():
