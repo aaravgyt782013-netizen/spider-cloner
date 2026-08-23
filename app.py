@@ -1,29 +1,188 @@
-from flask import Flask, render_template, request, Response
+from flask import Flask, request, jsonify
 import requests
 import time
 
 app = Flask(__name__)
 
-def log_stream(data):
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spidey Cloner v2 | Symbiote Edition</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #050505;
+            --panel-bg: #0b0b0e;
+            --crimson-red: #8b0000;
+            --bright-red: #ff1e1e;
+            --glow-red: rgba(255, 30, 30, 0.4);
+            --text-main: #e0e0e0;
+            --text-muted: #888888;
+            --border-dark: #1f1f2e;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-deep);
+            background-image: radial-gradient(circle at 50% 10%, rgba(139, 0, 0, 0.15) 0%, transparent 60%);
+            color: var(--text-main);
+            margin: 0; padding: 10px; box-sizing: border-box;
+        }
+        *, *:before, *:after { box-sizing: inherit; }
+        .container {
+            width: 100%; max-width: 600px; margin: 20px auto;
+            background: var(--panel-bg); padding: 20px; border-radius: 12px;
+            border: 1px solid var(--crimson-red);
+            box-shadow: 0 0 25px rgba(139, 0, 0, 0.25);
+        }
+        h2 {
+            font-family: 'Orbitron', sans-serif; text-align: center;
+            color: var(--bright-red); text-shadow: 0 0 10px var(--glow-red);
+            font-size: clamp(1.2rem, 4vw, 1.5rem); margin-bottom: 20px;
+        }
+        label {
+            display: block; margin-top: 14px; font-size: 12px;
+            font-weight: 600; color: #b3b3b3; text-transform: uppercase;
+        }
+        input[type="password"], input[type="text"] {
+            width: 100%; padding: 12px; margin-top: 6px;
+            background: #08080a; color: #fff; border: 1px solid #262636;
+            border-radius: 8px; font-size: 14px;
+        }
+        input:focus { border-color: var(--bright-red); outline: none; }
+        .grid-section {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 10px; background: #070709; padding: 12px; border-radius: 8px;
+            margin-top: 8px; border: 1px solid var(--border-dark);
+        }
+        .grid-section label { color: var(--text-main); font-weight: 400; text-transform: none; margin: 0; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+        input[type="checkbox"] { accent-color: var(--bright-red); width: 16px; height: 16px; cursor: pointer; }
+        button {
+            width: 100%; padding: 14px; margin-top: 20px;
+            background: linear-gradient(135deg, var(--crimson-red), #5c0000);
+            color: white; font-family: 'Orbitron', sans-serif; font-size: 13px;
+            font-weight: 700; border-radius: 8px; border: 1px solid var(--bright-red); cursor: pointer;
+        }
+        button:hover { background: linear-gradient(135deg, #a30000, var(--crimson-red)); box-shadow: 0 0 20px var(--bright-red); }
+        .logs-title { font-family: 'Orbitron', sans-serif; font-size: 11px; color: var(--text-muted); margin-top: 20px; }
+        pre {
+            background: #030304; padding: 12px; border-radius: 8px; height: 180px;
+            overflow-y: scroll; color: #ff4d4d; font-family: monospace; font-size: 12px;
+            border: 1px solid #1a0000; margin-top: 6px; white-space: pre-wrap; word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🕷️ SPIDEY CLONER 🕸️</h2>
+        <div id="cloneForm">
+            <label>User Token</label>
+            <input type="password" id="token" placeholder="Paste your user token...">
+            
+            <label>Source Guild ID (Copy From)</label>
+            <input type="text" id="source_id" placeholder="Source ID">
+            
+            <label>Target Guild ID (Paste To)</label>
+            <input type="text" id="target_id" placeholder="Target ID">
+            
+            <label>Target Destruction (What to Delete First)</label>
+            <div class="grid-section">
+                <label><input type="checkbox" id="del_channels" checked> Channels</label>
+                <label><input type="checkbox" id="del_categories" checked> Categories</label>
+                <label><input type="checkbox" id="del_roles"> Roles</label>
+            </div>
+
+            <label>Replication Protocol (What to Clone)</label>
+            <div class="grid-section">
+                <label><input type="checkbox" id="clone_channels" checked> Channels</label>
+                <label><input type="checkbox" id="clone_categories" checked> Categories</label>
+                <label><input type="checkbox" id="clone_roles"> Roles</label>
+                <label><input type="checkbox" id="clone_perms"> Overwrites</label>
+            </div>
+            
+            <button id="cloneBtn">INITIATE WEB-CLONE</button>
+        </div>
+        
+        <div class="logs-title">SYSTEM OUTPUT LOGS</div>
+        <pre id="logs">System idle. Standing by for command...</pre>
+    </div>
+
+    <script>
+        document.getElementById('cloneBtn').addEventListener('click', async function() {
+            const token = document.getElementById('token').value.trim();
+            const source_id = document.getElementById('source_id').value.trim();
+            const target_id = document.getElementById('target_id').value.trim();
+            const logBox = document.getElementById('logs');
+
+            if (!token || !source_id || !target_id) {
+                logBox.innerText = "[!] Error: Please fill in Token, Source ID, and Target ID fields!";
+                return;
+            }
+
+            const payload = {
+                token: token,
+                source_id: source_id,
+                target_id: target_id,
+                del_channels: document.getElementById('del_channels').checked,
+                del_categories: document.getElementById('del_categories').checked,
+                del_roles: document.getElementById('del_roles').checked,
+                clone_channels: document.getElementById('clone_channels').checked,
+                clone_categories: document.getElementById('clone_categories').checked,
+                clone_roles: document.getElementById('clone_roles').checked,
+                clone_perms: document.getElementById('clone_perms').checked,
+            };
+
+            logBox.innerText = "[~] Transmission started... contacting web server...\n";
+
+            try {
+                const response = await fetch('/clone', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Server returned status ${response.status} (${response.statusText})`);
+                }
+
+                const result = await response.json();
+                if (result.logs && Array.isArray(result.logs)) {
+                    logBox.innerText = result.logs.join("\\n");
+                } else {
+                    logBox.innerText = "[!] Received empty response structure from server.";
+                }
+            } catch (err) {
+                logBox.innerText += "\\n[!] Critical execution error:\\n" + err.message;
+            }
+        });
+    </script>
+</body>
+</html>"""
+
+@app.route("/")
+def index():
+    return HTML_TEMPLATE
+
+@app.route("/clone", methods=["POST"])
+def clone():
+    data = request.json
     token = data.get("token")
     source_id = data.get("source_id")
     target_id = data.get("target_id")
     
     headers = {"Authorization": token, "Content-Type": "application/json"}
-    
-    yield "🕸️ Connecting to Discord API...\n"
+    logs = ["🕸️ Connecting to Discord API..."]
 
-    # 1. Fetch Source Data
     src_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}", headers=headers)
     if src_res.status_code != 200:
-        yield f"❌ Error accessing source server: {src_res.text}\n"
-        return
-    yield f"✅ Target Source Acquired: {src_res.json().get('name')}\n"
-
-    # 2. Handle Deletions in Target Server
-    yield "🧹 Cleaning target server based on preferences...\n"
+        logs.append(f"❌ Error accessing source server: {src_res.text}")
+        return jsonify({"logs": logs})
     
-    # Delete Target Channels & Categories if checked
+    logs.append(f"✅ Target Source Acquired: {src_res.json().get('name')}")
+    logs.append("🧹 Cleaning target server safely...")
+
+    # Cleanup channels/categories with rate-limit mitigation
     if data.get("del_channels") or data.get("del_categories"):
         tgt_chan_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers)
         if tgt_chan_res.status_code == 200:
@@ -31,123 +190,102 @@ def log_stream(data):
                 is_cat = (c['type'] == 4)
                 if (is_cat and data.get("del_categories")) or (not is_cat and data.get("del_channels")):
                     del_res = requests.delete(f"https://discord.com/api/v10/channels/{c['id']}", headers=headers)
-                    if del_res.status_code in [200, 204]:
-                        yield f"🗑️ Deleted {'Category' if is_cat else 'Channel'}: {c['name']}\n"
-                    time.sleep(0.5)
+                    if del_res.status_code == 429:
+                        time.sleep(float(del_res.json().get("retry_after", 2)))
+                        requests.delete(f"https://discord.com/api/v10/channels/{c['id']}", headers=headers)
+                    logs.append(f"🗑️ Deleted {'Category' : 'Channel' if not is_cat else 'Category'}: {c['name']}")
+                    time.sleep(0.4)
 
-    # Delete Target Roles if checked
+    # Cleanup roles
     if data.get("del_roles"):
         tgt_roles_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
         if tgt_roles_res.status_code == 200:
             for r in tgt_roles_res.json():
                 if r['name'] != "@everyone" and not r.get("managed"):
-                    r_del = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{r['id']}", headers=headers)
-                    if r_del.status_code in [204]:
-                        yield f"🗑️ Deleted Role: {r['name']}\n"
-                    time.sleep(0.5)
+                    del_res = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{r['id']}", headers=headers)
+                    if del_res.status_code == 429:
+                        time.sleep(float(del_res.json().get("retry_after", 2)))
+                        requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{r['id']}", headers=headers)
+                    logs.append(f"🗑️ Deleted Role: {r['name']}")
+                    time.sleep(0.4)
 
-    # 3. Clone Roles first if checked (needed for role-based permission overwrites)
-    role_map = {} # Maps source role IDs to newly created target role IDs
+    role_map = {}
     if data.get("clone_roles"):
-        yield "🎭 Cloning Roles...\n"
+        logs.append("🎭 Cloning Roles...")
         src_roles_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
         if src_roles_res.status_code == 200:
-            # Sort roles by position descending/ascending safely
             roles = sorted(src_roles_res.json(), key=lambda x: x.get('position', 0))
             for r in roles:
                 if r['name'] == "@everyone" or r.get("managed"):
-                    continue # Skip default/bot integration roles
-                
+                    continue
                 payload = {
-                    "name": r['name'],
-                    "permissions": r['permissions'],
-                    "color": r['color'],
-                    "hoist": r['hoist'],
-                    "mentionable": r['mentionable']
+                    "name": r['name'], "permissions": r['permissions'],
+                    "color": r['color'], "hoist": r['hoist'], "mentionable": r['mentionable']
                 }
                 r_create = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
+                if r_create.status_code == 429:
+                    time.sleep(float(r_create.json().get("retry_after", 2)))
+                    r_create = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
+                
                 if r_create.status_code in [200, 201]:
                     new_role = r_create.json()
                     role_map[r['id']] = new_role['id']
-                    yield f"✨ Created Role: {r['name']}\n"
-                time.sleep(0.5)
+                    logs.append(f"✨ Created Role: {r['name']}")
+                time.sleep(0.4)
 
-    # 4. Clone Categories and Channels
     if data.get("clone_channels") or data.get("clone_categories"):
-        yield "📁 Cloning Categories & Channels...\n"
+        logs.append("📁 Cloning Categories & Channels...")
         channels_res = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/channels", headers=headers)
         if channels_res.status_code == 200:
             channels = sorted(channels_res.json(), key=lambda x: x.get('position', 0))
             category_map = {}
 
-            # First pass: Create categories
             if data.get("clone_categories"):
                 for c in channels:
-                    if c['type'] == 4: # Category
+                    if c['type'] == 4:
                         payload = {"name": c['name'], "type": 4}
                         cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+                        if cr.status_code == 429:
+                            time.sleep(float(cr.json().get("retry_after", 2)))
+                            cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+                        
                         if cr.status_code in [200, 201]:
                             new_cat = cr.json()
                             category_map[c['id']] = new_cat['id']
-                            yield f"📁 Created Category: {c['name']}\n"
-                        time.sleep(0.5)
+                            logs.append(f"📁 Created Category: {c['name']}")
+                        time.sleep(0.4)
 
-            # Second pass: Create channels and map permission overwrites if selected
             if data.get("clone_channels"):
                 for c in channels:
-                    if c['type'] != 4: # Text or Voice
+                    if c['type'] != 4:
                         payload = {
-                            "name": c['name'],
-                            "type": c['type'],
-                            "topic": c.get("topic"),
-                            "nsfw": c.get("nsfw", False),
-                            "bitrate": c.get("bitrate"),
-                            "user_limit": c.get("user_limit")
+                            "name": c['name'], "type": c['type'],
+                            "topic": c.get("topic"), "nsfw": c.get("nsfw", False),
+                            "bitrate": c.get("bitrate"), "user_limit": c.get("user_limit")
                         }
-
                         if c.get("parent_id") and c["parent_id"] in category_map:
                             payload["parent_id"] = category_map[c["parent_id"]]
-
-                        # Map permission overwrites if enabled
+                        
                         if data.get("clone_perms") and "permission_overwrites" in c:
                             new_overwrites = []
                             for ow in c["permission_overwrites"]:
-                                # If it's a role overwrite, map it to the newly created target role ID
                                 if ow['type'] == 0 and ow['id'] in role_map:
-                                    new_overwrites.append({
-                                        "id": role_map[ow['id']],
-                                        "type": 0,
-                                        "allow": ow['allow'],
-                                        "deny": ow['deny']
-                                    })
-                                elif ow['type'] == 1: # Member overwrite
-                                    new_overwrites.append({
-                                        "id": ow['id'],
-                                        "type": 1,
-                                        "allow": ow['allow'],
-                                        "deny": ow['deny']
-                                    })
+                                    new_overwrites.append({"id": role_map[ow['id']], "type": 0, "allow": ow['allow'], "deny": ow['deny']})
+                                elif ow['type'] == 1:
+                                    new_overwrites.append({"id": ow['id'], "type": 1, "allow": ow['allow'], "deny": ow['deny']})
                             payload["permission_overwrites"] = new_overwrites
 
                         cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+                        if cr.status_code == 429:
+                            time.sleep(float(cr.json().get("retry_after", 2)))
+                            cr = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+
                         if cr.status_code in [200, 201]:
-                            yield f"💬 Created Channel: {c['name']}\n"
-                        time.sleep(0.5)
+                            logs.append(f"💬 Created Channel: {c['name']}")
+                        time.sleep(0.4)
 
-    yield "🎉 Spider-Cloning complete! All web lines secured.\n"
-
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-@app.route("/clone", methods=["POST"])
-def clone():
-    return Response(log_stream(request.json), mimetype='text/plain')
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-
-# (Keep all your HTML_TEMPLATE and route definitions above this...)
+    logs.append("🎉 Spider-Cloning complete successfully!")
+    return jsonify({"logs": logs})
 
 if __name__ == "__main__":
     import os
