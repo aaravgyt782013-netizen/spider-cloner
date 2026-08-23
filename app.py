@@ -71,10 +71,10 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
         </div>
 
         {% if tab == 'cloner' %}
-        <h3>Advanced Server Cloner</h3>
+        <h3>Roxy-Engine Cloner (User Token)</h3>
         <form method="POST" action="/clone" target="_blank">
-            <label>Discord Token (User or Bot)</label>
-            <input type="password" name="token" required placeholder="Enter token...">
+            <label>Discord User Token</label>
+            <input type="password" name="token" required placeholder="Enter your user account token...">
             
             <label>Source Server ID</label>
             <input type="text" name="source_id" required placeholder="Source ID...">
@@ -83,15 +83,15 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
             <input type="text" name="target_id" required placeholder="Target ID...">
             
             <div class="checkbox-grid">
-                <label><input type="checkbox" name="delete_channels" checked> Delete Target Channels</label>
-                <label><input type="checkbox" name="delete_roles" checked> Delete Target Roles</label>
-                <label><input type="checkbox" name="clone_channels" checked> Clone Channels/Cats</label>
-                <label><input type="checkbox" name="clone_roles" checked> Clone Roles & Order</label>
+                <label><input type="checkbox" name="delete_channels" checked> Delete Channels</label>
+                <label><input type="checkbox" name="delete_roles" checked> Delete Roles</label>
+                <label><input type="checkbox" name="clone_channels" checked> Clone Channels</label>
+                <label><input type="checkbox" name="clone_roles" checked> Clone Roles</label>
                 <label><input type="checkbox" name="clone_emojis" checked> Clone Emojis</label>
-                <label><input type="checkbox" name="clone_settings" checked> Clone Server Settings</label>
+                <label><input type="checkbox" name="clone_settings" checked> Clone Settings</label>
             </div>
 
-            <button type="submit">EXECUTE CLONING PROTOCOL</button>
+            <button type="submit">START ROXY CLONE PROTOCOL</button>
         </form>
         {% elif tab == 'admin' and username == 'aaravg7820133.exe' %}
         <h3>⚡ Mass Join Control Panel</h3>
@@ -179,11 +179,11 @@ def clone_server():
     headers = {"Authorization": token, "Content-Type": "application/json"}
     
     def generate_stream():
-        yield "<html><head><title>Cloning Logs</title><style>body{background:#050505;color:#00ffcc;font-family:monospace;padding:20px;}</style></head><body><pre>" + (" " * 1024) + "\n"
+        yield "<html><head><title>Roxy Cloner Logs</title><style>body{background:#050505;color:#00ffcc;font-family:monospace;padding:20px;}</style></head><body><pre>" + (" " * 1024) + "\n"
         
-        # 1. Delete Channels safely
+        # 1. Delete Channels
         if del_channels:
-            yield "[+] Deleting target channels...\n"
+            yield "[+] Wiping target channels...\n"
             r_tc = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers)
             if r_tc.status_code == 200:
                 for ch in r_tc.json():
@@ -193,10 +193,10 @@ def clone_server():
                         pass
                     time.sleep(0.02)
 
-        # 2. Resilient Role Purge
+        # 2. Delete Roles
         if del_roles:
-            yield "[+] Purging target roles safely...\n"
-            for pass_num in range(3):
+            yield "[+] Wiping target roles safely...\n"
+            for _ in range(3):
                 r_tr = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
                 if r_tr.status_code == 200:
                     roles = r_tr.json()
@@ -214,9 +214,9 @@ def clone_server():
                     if not deleted_any:
                         break
 
-        # 3. Clone Roles with Detailed Status Output
+        # 3. Roxy Role Replication Method
         if c_roles:
-            yield "[+] Creating roles in order (Diagnostic Mode)...\n"
+            yield "[+] Replicating source roles...\n"
             r_source_roles = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
             if r_source_roles.status_code == 200:
                 source_roles = sorted([r for r in r_source_roles.json() if not r.get("managed")], key=lambda x: x['position'])
@@ -240,14 +240,14 @@ def clone_server():
                         if res.status_code in [200, 201]:
                             yield f"[V] Created role: {role['name']}\n"
                         else:
-                            yield f"[ERR {res.status_code}] Failed role: {role['name']} -> {res.text[:60]}\n"
-                    except Exception as e:
-                        yield f"[-] Exception on role {role['name']}\n"
+                            yield f"[-] Blocked/Skipped role ({res.status_code}): {role['name']}\n"
+                    except:
+                        yield f"[-] Failed request for role: {role['name']}\n"
                     time.sleep(0.04)
 
         # 4. Clone Channels & Categories
         if c_channels:
-            yield "[+] Cloning channels and categories...\n"
+            yield "[+] Replicating channels and categories...\n"
             r_channels = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/channels", headers=headers)
             if r_channels.status_code == 200:
                 channels = r_channels.json()
@@ -272,7 +272,7 @@ def clone_server():
 
         # 5. Clone Emojis
         if c_emojis:
-            yield "[+] Cloning emojis...\n"
+            yield "[+] Replicating emojis...\n"
             r_emo = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/emojis", headers=headers)
             if r_emo.status_code == 200:
                 for emo in r_emo.json():
@@ -287,7 +287,7 @@ def clone_server():
 
         # 6. Clone Settings
         if c_settings:
-            yield "[+] Cloning server settings...\n"
+            yield "[+] Replicating server settings...\n"
             try:
                 r_src = requests.get(f"https://discord.com/api/v10/guilds/{source_id}", headers=headers, timeout=2)
                 if r_src.status_code == 200:
@@ -301,7 +301,7 @@ def clone_server():
             except:
                 pass
 
-        yield "\n[+] CLONING PROTOCOL COMPLETED SUCCESSFULLY!</pre></body></html>"
+        yield "\n[+] CLONING PROTOCOL COMPLETED!</pre></body></html>"
 
     return Response(generate_stream(), mimetype='text/html')
 
