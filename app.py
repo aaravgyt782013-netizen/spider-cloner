@@ -183,12 +183,26 @@ def clone_server():
     def generate_stream():
         yield "<html><head><title>Cloning Logs</title><style>body{background:#050505;color:#00ffcc;font-family:monospace;padding:20px;}</style></head><body><pre>" + (" " * 2048) + "\n"
         
+        # Verify bot identity first
+        bot_check = requests.get("https://discord.com/api/v10/users/@me", headers=headers)
+        if bot_check.status_code != 200:
+            yield f"[CRITICAL ERROR] Bot Token is invalid or unauthorized! Status: {bot_check.status_code} - {bot_check.text}\n</pre></body></html>"
+            return
+        bot_info = bot_check.json()
+        yield f"[INFO] Authenticated as Bot: {bot_info.get('username')} (ID: {bot_info.get('id')})\n"
+
         test_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}", headers=headers)
         if test_res.status_code != 200:
-            yield f"[ERROR] Bot cannot access target server {target_id}! Check permissions.\n</pre></body></html>"
+            yield f"\n[ERROR] Bot cannot access target server {target_id}!\n"
+            yield f"Discord Response Code: {test_res.status_code}\n"
+            yield f"Discord Error Details: {test_res.text}\n\n"
+            yield "TROUBLESHOOTING TIPS:\n"
+            yield "1. Make sure the BOT_TOKEN set in Render environment variables belongs to the exact same bot you invited.\n"
+            yield "2. Confirm the Target Server ID is correct.\n"
+            yield "</pre></body></html>"
             return
         else:
-            yield "[OK] Target server connection verified.\n\n"
+            yield "[OK] Target server connection verified successfully.\n\n"
 
         if del_channels:
             yield "[+] Deleting existing channels...\n"
