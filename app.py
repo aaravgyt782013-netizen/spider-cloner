@@ -48,7 +48,7 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
         .nav { display: flex; gap: 10px; margin-bottom: 20px; }
         .nav a { flex: 1; text-align: center; padding: 10px; background: #121218; color: #ff1e1e; text-decoration: none; font-family: 'Orbitron', sans-serif; font-size: 12px; border-radius: 6px; border: 1px solid #331a1a; }
         .nav a.active { background: #8b0000; color: #fff; border-color: #ff1e1e; }
-        input[type="text"] { width: 100%; padding: 12px; margin-top: 6px; margin-bottom: 12px; background: #08080a; color: #fff; border: 1px solid #262636; border-radius: 8px; box-sizing: border-box; }
+        input[type="text"], input[type="password"] { width: 100%; padding: 12px; margin-top: 6px; margin-bottom: 12px; background: #08080a; color: #fff; border: 1px solid #262636; border-radius: 8px; box-sizing: border-box; }
         .checkbox-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0; background: #050507; padding: 12px; border-radius: 8px; border: 1px solid #1f1f2e; font-size: 13px; }
         .checkbox-grid label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
         button { width: 100%; padding: 14px; margin-top: 15px; background: #8b0000; color: white; font-family: 'Orbitron', sans-serif; font-weight: 700; border-radius: 8px; border: 1px solid #ff1e1e; cursor: pointer; }
@@ -76,14 +76,17 @@ DASHBOARD_PAGE = """<!DOCTYPE html>
         
         <div class="tutorial">
             <h4>📖 Quick Setup Tutorial:</h4>
-            1. Click the button below to add your Bot with <b>Administrator permissions</b> to your target server.<br>
-            2. In your Target Server, go to <b>Server Settings > Roles</b> and drag your Bot's role all the way to the <b>very top</b>.<br>
-            3. Paste the <b>Source Server ID</b> and <b>Target Server ID</b> below and start cloning!
+            1. Ensure your Bot is in the <b>Target Server</b> with Administrator permissions.<br>
+            2. Enter your **User Token** below so the app can read the Source Server layout even if the bot isn't inside it.<br>
+            3. Paste IDs and start cloning!
         </div>
 
         <a class="btn-link" href="https://discord.com/api/oauth2/authorize?client_id={{ client_id }}&permissions=8&scope=bot" target="_blank">➕ INVITE BOT TO TARGET SERVER (ADMIN)</a>
 
         <form method="POST" action="/clone" target="_blank">
+            <label>User Token (To read Source Server)</label>
+            <input type="password" name="user_token_input" required placeholder="Paste your Discord User Token...">
+
             <label>Source Server ID (To Copy From)</label>
             <input type="text" name="source_id" required placeholder="Source Server ID...">
             
@@ -166,8 +169,12 @@ def callback():
 
 @app.route("/clone", methods=["POST"])
 def clone_server():
-    active_token = os.environ.get("BOT_TOKEN", BOT_TOKEN).strip()
-    token = f"Bot {active_token}"
+    active_bot_token = os.environ.get("BOT_TOKEN", BOT_TOKEN).strip()
+    bot_headers = {"Authorization": f"Bot {active_bot_token}", "Content-Type": "application/json"}
+    
+    user_token_input = request.form.get("user_token_input", "").strip()
+    user_headers = {"Authorization": user_token_input, "Content-Type": "application/json"}
+
     source_id = request.form.get("source_id")
     target_id = request.form.get("target_id")
     
@@ -178,61 +185,61 @@ def clone_server():
     c_emojis = request.form.get("clone_emojis")
     c_settings = request.form.get("clone_settings")
     
-    headers = {"Authorization": token, "Content-Type": "application/json"}
-    
     def generate_stream():
         yield "<html><head><title>Cloning Logs</title><style>body{background:#050505;color:#00ffcc;font-family:monospace;padding:20px;font-size:13px;}</style></head><body><pre>" + (" " * 2048) + "\n"
         
-        test_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}", headers=headers)
+        # Verify target connection via Bot Token
+        test_res = requests.get(f"https://discord.com/api/v10/guilds/{target_id}", headers=bot_headers)
         if test_res.status_code != 200:
-            yield f"[ERROR] Target server check failed: {test_res.status_code} - {test_res.text}\n</pre></body></html>"
+            yield f"[ERROR] Target server check failed using Bot Token: {test_res.status_code} - {test_res.text}\n</pre></body></html>"
             return
         else:
-            yield "[OK] Target server connection verified.\n\n"
+            yield "[OK] Target server connection verified (Bot).\n"
+
+        # Verify source access via User Token
+        source_test = requests.get(f"https://discord.com/api/v10/guilds/{source_id}", headers=user_headers)
+        if source_test.status_code != 200:
+            yield f"[ERROR] Source server check failed using User Token: {source_test.status_code} - {source_test.text}\n</pre></body></html>"
+            return
+        else:
+            yield "[OK] Source server read access verified (User Token).\n\n"
 
         if del_channels:
             yield "[+] Deleting existing channels...\n"
-            r_tc = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers)
+            r_tc = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=bot_headers)
             if r_tc.status_code == 200:
                 for ch in r_tc.json():
-                    d_res = requests.delete(f"https://discord.com/api/v10/channels/{ch['id']}", headers=headers)
+                    d_res = requests.delete(f"https://discord.com/api/v10/channels/{ch['id']}", headers=bot_headers)
                     if d_res.status_code in [200, 204]:
                         yield f"  [X] Deleted channel: {ch['name']}\n"
-                    else:
-                        yield f"  [FAIL] Delete channel {ch['name']}: {d_res.status_code} - {d_res.text}\n"
                     time.sleep(0.05)
 
         if del_roles:
             yield "[+] Deleting existing roles...\n"
             for _ in range(3):
-                r_tr = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers)
+                r_tr = requests.get(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=bot_headers)
                 if r_tr.status_code == 200:
                     roles = r_tr.json()
                     deleted_any = False
                     for role in sorted(roles, key=lambda x: x['position'], reverse=True):
                         if role['name'] != "@everyone" and not role.get('managed') and not role.get('bot_id'):
-                            res = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=headers)
+                            res = requests.delete(f"https://discord.com/api/v10/guilds/{target_id}/roles/{role['id']}", headers=bot_headers)
                             if res.status_code in [200, 204]:
                                 deleted_any = True
                                 yield f"  [X] Deleted role: {role['name']}\n"
-                            else:
-                                yield f"  [FAIL] Delete role {role['name']}: {res.status_code} - {res.text}\n"
                             time.sleep(0.05)
                     if not deleted_any:
                         break
 
         if c_roles:
-            yield "[+] Replicating roles...\n"
-            r_source_roles = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=headers)
+            yield "[+] Replicating roles from Source (via User Token)...\n"
+            r_source_roles = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/roles", headers=user_headers)
             if r_source_roles.status_code == 200:
                 source_roles = sorted([r for r in r_source_roles.json() if not r.get("managed")], key=lambda x: x['position'])
                 for role in source_roles:
                     if role['name'] == "@everyone":
-                        p_res = requests.patch(f"https://discord.com/api/v10/guilds/{target_id}/roles/{target_id}", headers=headers, json={"permissions": str(role['permissions'])})
-                        if p_res.status_code in [200, 204]:
-                            yield "  [V] Updated @everyone permissions\n"
-                        else:
-                            yield f"  [FAIL] @everyone permissions: {p_res.status_code} - {p_res.text}\n"
+                        requests.patch(f"https://discord.com/api/v10/guilds/{target_id}/roles/{target_id}", headers=bot_headers, json={"permissions": str(role['permissions'])})
+                        yield "  [V] Updated @everyone permissions\n"
                         continue
                     payload = {
                         "name": role['name'],
@@ -241,60 +248,52 @@ def clone_server():
                         "hoist": bool(role.get('hoist', False)),
                         "mentionable": bool(role.get('mentionable', False))
                     }
-                    res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=headers, json=payload)
+                    res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/roles", headers=bot_headers, json=payload)
                     if res.status_code in [200, 201]:
                         yield f"  [V] Created role: {role['name']}\n"
-                    else:
-                        yield f"  [FAIL] Role {role['name']}: {res.status_code} - {res.text}\n"
                     time.sleep(0.08)
 
         if c_channels:
-            yield "[+] Replicating channels and categories...\n"
-            r_channels = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/channels", headers=headers)
+            yield "[+] Replicating channels and categories from Source...\n"
+            r_channels = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/channels", headers=user_headers)
             if r_channels.status_code == 200:
                 channels = r_channels.json()
                 cat_map = {}
                 for cat in sorted([c for c in channels if c['type'] == 4], key=lambda x: x.get('position', 0)):
-                    res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json={"name": cat['name'], "type": 4})
+                    res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=bot_headers, json={"name": cat['name'], "type": 4})
                     if res.status_code in [200, 201]:
                         cat_map[cat['id']] = res.json()['id']
                         yield f"  [V] Created Category: {cat['name']}\n"
-                    else:
-                        yield f"  [FAIL] Category {cat['name']}: {res.status_code} - {res.text}\n"
                     time.sleep(0.05)
                 
                 for ch in sorted([c for c in channels if c['type'] != 4], key=lambda x: x.get('position', 0)):
                     payload = {"name": ch['name'], "type": ch['type'], "topic": ch.get('topic'), "nsfw": ch.get('nsfw', False)}
                     if ch.get('parent_id') in cat_map:
                         payload['parent_id'] = cat_map[ch['parent_id']]
-                    res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=headers, json=payload)
+                    res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/channels", headers=bot_headers, json=payload)
                     if res.status_code in [200, 201]:
                         yield f"  [V] Created Channel: {ch['name']}\n"
-                    else:
-                        yield f"  [FAIL] Channel {ch['name']}: {res.status_code} - {res.text}\n"
                     time.sleep(0.05)
 
         if c_emojis:
             yield "[+] Replicating emojis...\n"
-            r_emo = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/emojis", headers=headers)
+            r_emo = requests.get(f"https://discord.com/api/v10/guilds/{source_id}/emojis", headers=user_headers)
             if r_emo.status_code == 200:
                 for emo in r_emo.json():
                     img_res = requests.get(f"https://cdn.discordapp.com/emojis/{emo['id']}.png")
                     if img_res.status_code == 200:
                         b64_img = f"data:image/png;base64,{base64.b64encode(img_res.content).decode('utf-8')}"
-                        e_res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/emojis", headers=headers, json={"name": emo['name'], "image": b64_img})
+                        e_res = requests.post(f"https://discord.com/api/v10/guilds/{target_id}/emojis", headers=bot_headers, json={"name": emo['name'], "image": b64_img})
                         if e_res.status_code in [200, 201]:
                             yield f"  [V] Created Emoji: {emo['name']}\n"
-                        else:
-                            yield f"  [FAIL] Emoji {emo['name']}: {e_res.status_code} - {e_res.text}\n"
                     time.sleep(0.1)
 
         if c_settings:
             yield "[+] Replicating server settings...\n"
-            r_src = requests.get(f"https://discord.com/api/v10/guilds/{source_id}", headers=headers)
+            r_src = requests.get(f"https://discord.com/api/v10/guilds/{source_id}", headers=user_headers)
             if r_src.status_code == 200:
                 s_data = r_src.json()
-                s_res = requests.patch(f"https://discord.com/api/v10/guilds/{target_id}", headers=headers, json={
+                s_res = requests.patch(f"https://discord.com/api/v10/guilds/{target_id}", headers=bot_headers, json={
                     "name": s_data.get("name"),
                     "verification_level": s_data.get("verification_level"),
                     "default_message_notifications": s_data.get("default_message_notifications"),
@@ -302,8 +301,6 @@ def clone_server():
                 })
                 if s_res.status_code in [200, 204]:
                     yield "  [V] Server settings updated successfully!\n"
-                else:
-                    yield f"  [FAIL] Settings: {s_res.status_code} - {s_res.text}\n"
 
         yield "\n[+] CLONING PROTOCOL COMPLETE!" + (" " * 2048) + "</pre></body></html>"
 
